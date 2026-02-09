@@ -8,8 +8,8 @@ import readline from 'node:readline'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { execSync } from 'node:child_process'
 import { OAuth2Client } from 'google-auth-library'
+import fkill from 'fkill'
 
 // ---------------------------------------------------------------------------
 // Config
@@ -116,16 +116,7 @@ async function getAuthCodeFromBrowser(oauth2Client: OAuth2Client): Promise<strin
   })
 
   // Kill any stale process on the redirect port before starting our server
-  try {
-    const pid = execSync(`lsof -ti tcp:${REDIRECT_PORT}`, { encoding: 'utf-8' }).trim()
-    if (pid) {
-      for (const p of pid.split('\n')) {
-        execSync(`kill -9 ${p.trim()}`, { stdio: 'ignore' })
-      }
-    }
-  } catch {
-    // Nothing on the port, or kill failed — either way, proceed
-  }
+  await fkill(`:${REDIRECT_PORT}`, { force: true, silent: true }).catch(() => {})
 
   process.stderr.write('\n1. Open this URL to authorize:\n\n')
   process.stderr.write('   ' + authUrl + '\n\n')

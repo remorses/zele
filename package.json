@@ -24,6 +24,7 @@
     "better-sqlite3": "^12.6.2",
     "cli-table3": "^0.6.5",
     "email-addresses": "^5.0.0",
+    "fkill": "^10.0.3",
     "goke": "^6.1.1",
     "google-auth-library": "^10.5.0",
     "googleapis": "^171.0.0",
