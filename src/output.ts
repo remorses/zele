@@ -93,10 +93,12 @@ export interface TableOptions {
 }
 
 export function printTable({ head, rows, colWidths, colAligns }: TableOptions): void {
+  // NOTE: cli-table3 crashes if colWidths/colAligns are explicitly `undefined`
+  // (it treats the key as present but skips auto-compute). Only spread when defined.
   const table = new Table({
     head: head.map((h) => pc.bold(pc.cyan(h))),
-    colWidths,
-    colAligns,
+    ...(colWidths ? { colWidths } : {}),
+    ...(colAligns ? { colAligns } : {}),
     style: {
       head: [],
       border: [],
