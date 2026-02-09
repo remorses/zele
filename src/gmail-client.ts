@@ -1,5 +1,5 @@
 // Gmail API client for CLI/TUI use.
-// Wraps the googleapis Gmail SDK with structured methods, object params, and inferred return types.
+// Wraps the @googleapis/gmail SDK with structured methods, object params, and inferred return types.
 // No abstract interfaces, no RPC layer — just a concrete class for Gmail.
 // Ported from Zero's GoogleMailManager (apps/server/src/lib/driver/google.ts) with CLI adaptations:
 //   - No HTML sanitization (CLI renders text)
@@ -8,7 +8,7 @@
 //   - Body decoding inline with Buffer (no base64-js dependency)
 //   - Concurrent hydration with configurable concurrency limit
 
-import { google, type gmail_v1 } from 'googleapis'
+import { gmail as gmailApi, type gmail_v1 } from '@googleapis/gmail'
 import type { OAuth2Client } from 'google-auth-library'
 import { createMimeMessage } from 'mimetext'
 import { parseFrom, parseAddressList } from './email-utils.js'
@@ -185,7 +185,7 @@ export class GmailClient {
   private labelIdCache: Record<string, string> = {}
 
   constructor({ auth }: { auth: OAuth2Client }) {
-    this.gmail = google.gmail({ version: 'v1', auth })
+    this.gmail = gmailApi({ version: 'v1', auth })
   }
 
   // =========================================================================

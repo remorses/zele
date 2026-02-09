@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@googleapis/gmail':
+        specifier: ^16.1.1
+        version: 16.1.1
       '@libsql/client':
         specifier: ^0.15.15
         version: 0.15.15
@@ -29,9 +32,6 @@ importers:
       google-auth-library:
         specifier: ^10.5.0
         version: 10.5.0
-      googleapis:
-        specifier: ^171.0.0
-        version: 171.4.0
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
@@ -261,6 +261,10 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@googleapis/gmail@16.1.1':
+    resolution: {integrity: sha512-XFMMJvhpEoKzwBOHYrcbBu/jHS+8Aer5YmbMUsrZeJgXAbTD6K7K6+/1RJczXIqDoBzVDdECm4WtjAcvEHPLVg==}
+    engines: {node: '>=12.0.0'}
 
   '@hono/node-server@1.19.9':
     resolution: {integrity: sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw==}
@@ -805,10 +809,6 @@ packages:
   googleapis-common@8.0.1:
     resolution: {integrity: sha512-eCzNACUXPb1PW5l0ULTzMHaL/ltPRADoPgjBlT8jWsTbxkCp6siv+qKJ/1ldaybCthGwsYFYallF7u9AkU4L+A==}
     engines: {node: '>=18.0.0'}
-
-  googleapis@171.4.0:
-    resolution: {integrity: sha512-xybFL2SmmUgIifgsbsRQYRdNrSAYwxWZDmkZTGjUIaRnX5jPqR8el/cEvo6rCqh7iaZx6MfEPS/lrDgZ0bymkg==}
-    engines: {node: '>=18'}
 
   gopd@1.2.0:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
@@ -1470,6 +1470,12 @@ snapshots:
   '@esbuild/win32-x64@0.27.3':
     optional: true
 
+  '@googleapis/gmail@16.1.1':
+    dependencies:
+      googleapis-common: 8.0.1
+    transitivePeerDependencies:
+      - supports-color
+
   '@hono/node-server@1.19.9(hono@4.11.4)':
     dependencies:
       hono: 4.11.4
@@ -2111,13 +2117,6 @@ snapshots:
       google-auth-library: 10.5.0
       qs: 6.14.1
       url-template: 2.0.8
-    transitivePeerDependencies:
-      - supports-color
-
-  googleapis@171.4.0:
-    dependencies:
-      google-auth-library: 10.5.0
-      googleapis-common: 8.0.1
     transitivePeerDependencies:
       - supports-color
 

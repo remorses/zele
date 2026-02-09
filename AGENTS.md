@@ -17,6 +17,10 @@ all persistent state is stored in this DB via Prisma models:
 - `profiles`: cached account profile data
 - `sync_states`: misc per-account sync metadata (for example history IDs)
 
+## changelog
+
+keep `CHANGELOG.md` updated when making user-facing changes. bump the version in `package.json` and `src/cli.ts` together.
+
 ## migrations
 
 `src/db.ts` runs `src/schema.sql` on startup (idempotent migration) so new tables/indexes are applied automatically on each CLI process start.
