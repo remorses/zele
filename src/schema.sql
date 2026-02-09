@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS "thread_lists" (
     "query" TEXT NOT NULL DEFAULT '',
     "label_ids" TEXT NOT NULL DEFAULT '',
     "page_token" TEXT NOT NULL DEFAULT '',
+    "max_results" INTEGER NOT NULL DEFAULT 0,
     "data" TEXT NOT NULL,
     "ttl_ms" INTEGER NOT NULL,
     "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -56,5 +57,5 @@ CREATE TABLE IF NOT EXISTS "sync_states" (
     PRIMARY KEY ("email", "key"),
     CONSTRAINT "sync_states_email_fkey" FOREIGN KEY ("email") REFERENCES "accounts" ("email") ON DELETE CASCADE ON UPDATE CASCADE
 );
-CREATE UNIQUE INDEX "thread_lists_email_folder_query_label_ids_page_token_key" ON "thread_lists"("email", "folder", "query", "label_ids", "page_token");
+CREATE UNIQUE INDEX "thread_lists_email_folder_query_label_ids_page_token_max_results_key" ON "thread_lists"("email", "folder", "query", "label_ids", "page_token", "max_results");
 CREATE UNIQUE INDEX "threads_email_thread_id_key" ON "threads"("email", "thread_id");

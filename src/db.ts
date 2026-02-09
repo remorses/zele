@@ -73,6 +73,8 @@ async function migrateSchema(prisma: PrismaClient): Promise<void> {
     // Make CREATE INDEX idempotent
     .map((s) => s.replace(/^CREATE\s+UNIQUE\s+INDEX\b(?!\s+IF)/i, 'CREATE UNIQUE INDEX IF NOT EXISTS')
                  .replace(/^CREATE\s+INDEX\b(?!\s+IF)/i, 'CREATE INDEX IF NOT EXISTS'))
+
+
   for (const statement of statements) {
     await prisma.$executeRawUnsafe(statement)
   }

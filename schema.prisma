@@ -28,13 +28,14 @@ model thread_lists {
   query      String   @default("")
   label_ids  String   @default("")
   page_token String   @default("")
+  max_results Int     @default(0)
   data       String // JSON blob of ThreadListResult
   ttl_ms     Int
   created_at DateTime @default(now())
 
   account accounts @relation(fields: [email], references: [email], onDelete: Cascade)
 
-  @@unique([email, folder, query, label_ids, page_token])
+  @@unique([email, folder, query, label_ids, page_token, max_results])
 }
 
 model threads {

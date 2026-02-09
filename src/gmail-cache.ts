@@ -28,18 +28,17 @@ export async function cacheThreadList(
   data: unknown,
 ): Promise<void> {
   const prisma = await getPrisma()
-  // Encode maxResults into the query field so different page sizes get separate cache entries
-  const queryWithMax = [params.query ?? '', params.maxResults ? `__max:${params.maxResults}` : ''].filter(Boolean).join('|')
   const where = {
     email,
     folder: params.folder ?? '',
-    query: queryWithMax,
+    query: params.query ?? '',
     label_ids: params.labelIds?.join(',') ?? '',
     page_token: params.pageToken ?? '',
+    max_results: params.maxResults ?? 0,
   }
 
   await prisma.thread_lists.upsert({
-    where: { email_folder_query_label_ids_page_token: where },
+    where: { email_folder_query_label_ids_page_token_max_results: where },
     create: { ...where, data: JSON.stringify(data), ttl_ms: TTL.THREAD_LIST },
     update: { data: JSON.stringify(data), ttl_ms: TTL.THREAD_LIST, created_at: new Date() },
   })
@@ -50,15 +49,15 @@ export async function getCachedThreadList<T = unknown>(
   params: { folder?: string; query?: string; maxResults?: number; labelIds?: string[]; pageToken?: string },
 ): Promise<T | undefined> {
   const prisma = await getPrisma()
-  const queryWithMax = [params.query ?? '', params.maxResults ? `__max:${params.maxResults}` : ''].filter(Boolean).join('|')
   const row = await prisma.thread_lists.findUnique({
     where: {
-      email_folder_query_label_ids_page_token: {
+      email_folder_query_label_ids_page_token_max_results: {
         email,
         folder: params.folder ?? '',
-        query: queryWithMax,
+        query: params.query ?? '',
         label_ids: params.labelIds?.join(',') ?? '',
         page_token: params.pageToken ?? '',
+        max_results: params.maxResults ?? 0,
       },
     },
   })
