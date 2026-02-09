@@ -8,6 +8,7 @@ import readline from 'node:readline'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { execSync } from 'node:child_process'
 import { OAuth2Client } from 'google-auth-library'
 
 // ---------------------------------------------------------------------------
@@ -107,12 +108,24 @@ function extractCodeFromInput(input: string): string | null {
 // 1. Localhost HTTP server (works when CLI runs on same machine as browser)
 // 2. Manual paste (works when CLI runs on a remote/headless machine)
 // Whichever completes first wins, the other is cleaned up.
-function getAuthCodeFromBrowser(oauth2Client: OAuth2Client): Promise<string> {
+async function getAuthCodeFromBrowser(oauth2Client: OAuth2Client): Promise<string> {
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
     prompt: 'consent',
   })
+
+  // Kill any stale process on the redirect port before starting our server
+  try {
+    const pid = execSync(`lsof -ti tcp:${REDIRECT_PORT}`, { encoding: 'utf-8' }).trim()
+    if (pid) {
+      for (const p of pid.split('\n')) {
+        execSync(`kill -9 ${p.trim()}`, { stdio: 'ignore' })
+      }
+    }
+  } catch {
+    // Nothing on the port, or kill failed — either way, proceed
+  }
 
   process.stderr.write('\n1. Open this URL to authorize:\n\n')
   process.stderr.write('   ' + authUrl + '\n\n')
@@ -172,15 +185,7 @@ function getAuthCodeFromBrowser(oauth2Client: OAuth2Client): Promise<string> {
       res.end('<h1>No authorization code received</h1>')
     })
 
-    server.listen(REDIRECT_PORT, () => {
-      // Silently listening — no need to log the port
-    })
-
-    server.on('error', (err) => {
-      // Port already in use — fall back to paste-only mode
-      server = null
-      process.stderr.write(`Note: Could not start local server (${(err as NodeJS.ErrnoException).code}). Use paste method.\n`)
-    })
+    server.listen(REDIRECT_PORT)
 
     // --- Method 2: Stdin paste ---
     if (process.stdin.isTTY) {
