@@ -7,8 +7,17 @@ datasource db {
   provider = "sqlite"
 }
 
+// Lifecycle status for account credentials stored in `accounts`.
+enum AccountStatus {
+  active
+  disabled
+}
+
+// Stores one OAuth credential set per Gmail account email.
+// This is the source of truth for auth state (tokens, refresh metadata).
 model accounts {
   email      String   @id
+  account_status AccountStatus @default(active)
   tokens     String // JSON-encoded OAuth2 Credentials
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -21,6 +30,8 @@ model accounts {
   sync_states   sync_states[]
 }
 
+// Caches thread list/search responses per account and query parameters.
+// Used for fast list/search rendering and reduced Gmail API calls.
 model thread_lists {
   id         Int      @id @default(autoincrement())
   email      String
@@ -38,6 +49,8 @@ model thread_lists {
   @@unique([email, folder, query, label_ids, page_token, max_results])
 }
 
+// Caches hydrated thread payloads per account + thread ID.
+// Used by mail read and post-mutation cache invalidation.
 model threads {
   id         Int      @id @default(autoincrement())
   email      String
@@ -51,6 +64,8 @@ model threads {
   @@unique([email, thread_id])
 }
 
+// Caches label metadata per account (label id/name/type payload).
+// Used by label list/get and related command outputs.
 model labels {
   email      String   @id
   data       String // JSON blob of label list
@@ -60,6 +75,8 @@ model labels {
   account accounts @relation(fields: [email], references: [email], onDelete: Cascade)
 }
 
+// Caches unread counts per label per account.
+// Used by label counts to avoid recomputing on every invocation.
 model label_counts {
   email      String   @id
   data       String // JSON blob of label counts
@@ -69,6 +86,8 @@ model label_counts {
   account accounts @relation(fields: [email], references: [email], onDelete: Cascade)
 }
 
+// Caches Gmail profile payload per account (totals/history id).
+// Used by profile command and account metadata lookups.
 model profiles {
   email      String   @id
   data       String // JSON blob of profile
@@ -78,9 +97,26 @@ model profiles {
   account accounts @relation(fields: [email], references: [email], onDelete: Cascade)
 }
 
+// Allowed keys for sync_states entries.
+// Add new values here as sync metadata needs evolve.
+enum SyncStateKey {
+  history_id
+}
+
+// Stores persistent per-account sync metadata as generic key/value pairs.
+// Use this for lightweight sync cursors and markers that are not cached API
+// payloads, for example `history_id` (incremental Gmail history cursor),
+// `last_full_sync_at`, or other small account-scoped checkpoints.
+//
+// Why generic instead of typed columns/tables:
+// - keeps schema stable while sync features evolve
+// - enables simple upsert by (email, key)
+//
+// If many core sync fields become permanent, consider promoting them to a
+// typed table for stronger validation and query ergonomics.
 model sync_states {
   email String
-  key   String
+  key   SyncStateKey
   value String
 
   account accounts @relation(fields: [email], references: [email], onDelete: Cascade)

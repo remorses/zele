@@ -74,6 +74,15 @@ async function migrateSchema(prisma: PrismaClient): Promise<void> {
     .map((s) => s.replace(/^CREATE\s+UNIQUE\s+INDEX\b(?!\s+IF)/i, 'CREATE UNIQUE INDEX IF NOT EXISTS')
                  .replace(/^CREATE\s+INDEX\b(?!\s+IF)/i, 'CREATE INDEX IF NOT EXISTS'))
 
+  // Compatibility migration: older DBs may not have account_status yet.
+  try {
+    await prisma.$executeRawUnsafe(
+      "ALTER TABLE \"accounts\" ADD COLUMN \"account_status\" TEXT NOT NULL DEFAULT 'active'",
+    )
+  } catch {
+    // Column already exists.
+  }
+
 
   for (const statement of statements) {
     await prisma.$executeRawUnsafe(statement)
