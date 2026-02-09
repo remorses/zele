@@ -910,6 +910,13 @@ export class GmailClient {
     }
   }
 
+  // NOTE: This method wraps Gmail's push notification API (users.watch),
+  // which requires a Google Cloud Pub/Sub topic. Since zele uses borrowed
+  // OAuth credentials (Thunderbird's client ID), we cannot create Pub/Sub
+  // resources on their GCP project. Users would need their own GCP project,
+  // which defeats the zero-config design. The CLI uses History API polling
+  // instead (see src/commands/watch.ts). This method is kept for potential
+  // future use if users bring their own GCP credentials.
   async watch({
     topicName,
     labelIds = ['INBOX'],
