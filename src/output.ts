@@ -12,6 +12,7 @@ import yaml from 'js-yaml'
 import TurndownService from 'turndown'
 import { remark } from 'remark'
 import pc from 'picocolors'
+import EmailReplyParser from 'email-reply-parser'
 
 // ---------------------------------------------------------------------------
 // TTY detection (used for coloring + wrapping decisions)
@@ -169,11 +170,15 @@ export function htmlToMarkdown(html: string): string {
 // ---------------------------------------------------------------------------
 
 export function renderEmailBody(body: string, mimeType: string): string {
-  if (mimeType === 'text/html') {
-    return htmlToMarkdown(body)
-  }
+  if (mimeType === 'text/html') return htmlToMarkdown(body)
   return body.trim()
 }
+
+// ---------------------------------------------------------------------------
+// Quoted reply stripping (email-reply-parser)
+// ---------------------------------------------------------------------------
+
+export const replyParser = new EmailReplyParser()
 
 // ---------------------------------------------------------------------------
 // YAML output

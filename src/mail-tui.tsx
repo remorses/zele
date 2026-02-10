@@ -343,28 +343,32 @@ function ThreadDetail({
   )
 
   if (thread.isLoading || !thread.data) {
-    return <Detail isLoading navigationTitle="Loading..." />
+    return <Detail markdown="" navigationTitle="Loading..." />
   }
 
   const t = thread.data
   const messages = t.messages
 
-  // Build markdown: each message as a section
+  // Build markdown: each message as a section with compact heading
+  // Prefer text/plain + email-reply-parser for clean quote stripping.
+  // Fall back to HTML → turndown when no text body is available.
   const parts = messages.map((msg) => {
-    const header = [
-      `**From:** ${formatSender(msg.from)}`,
-      `**Date:** ${msg.date}`,
-      `**To:** ${msg.to.map((r) => r.email).join(', ')}`,
-      msg.cc && msg.cc.length > 0 ? `**Cc:** ${msg.cc.map((r) => r.email).join(', ')}` : null,
-      msg.attachments.length > 0
-        ? `**Attachments:** ${msg.attachments.map((a) => `${a.filename} (${formatSize(a.size)})`).join(', ')}`
-        : null,
-    ]
-      .filter(Boolean)
-      .join('  \n')
+    const senderName = msg.from.name || msg.from.email
+    const heading = `### ${senderName} — ${formatDate(msg.date)}`
 
-    const body = renderEmailBody(msg.body, msg.mimeType)
-    return `${header}\n\n${body}`
+    const attachmentLine =
+      msg.attachments.length > 0
+        ? `📎 ${msg.attachments.map((a) => `${a.filename} (${formatSize(a.size)})`).join(', ')}`
+        : null
+
+    let body: string
+    if (msg.textBody) {
+      body = replyParser.parseReply(msg.textBody)
+    } else {
+      body = renderEmailBody(msg.body, msg.mimeType)
+    }
+
+    return [heading, attachmentLine, '', body].filter((l) => l !== null).join('\n')
   })
 
   const markdown = `# ${t.subject}\n\n---\n\n` + parts.join('\n\n---\n\n')
@@ -388,10 +392,15 @@ function ThreadDetail({
       markdown={markdown}
       metadata={
         <Detail.Metadata>
-          <Detail.Metadata.Label title="Subject" text={t.subject} />
+          <Detail.Metadata.Label title="From" text={formatSender(latestMsg.from)} />
+          <Detail.Metadata.Label title="To" text={latestMsg.to.map((r) => r.name || r.email).join(', ')} />
+          {latestMsg.cc && latestMsg.cc.length > 0 && (
+            <Detail.Metadata.Label title="Cc" text={latestMsg.cc.map((r) => r.name || r.email).join(', ')} />
+          )}
+          <Detail.Metadata.Label title="Date" text={latestMsg.date} />
+          <Detail.Metadata.Separator />
           <Detail.Metadata.Label title="Messages" text={String(t.messageCount)} />
           <Detail.Metadata.Label title="Participants" text={[...participants.values()].join(', ')} />
-          <Detail.Metadata.Separator />
           {labels.length > 0 && (
             <Detail.Metadata.TagList title="Labels">
               {labels.map((l) => (

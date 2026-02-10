@@ -46,8 +46,9 @@ export interface ParsedMessage {
   inReplyTo?: string
   references?: string
   listUnsubscribe?: string
-  body: string // decoded plain text or html
+  body: string // decoded body (html preferred for rich rendering)
   mimeType: string // 'text/plain' or 'text/html'
+  textBody: string | null // decoded text/plain body when available (for reply parsing)
   attachments: AttachmentMeta[]
 }
 
@@ -1130,7 +1131,7 @@ export class GmailClient {
       .map((h) => h.value ?? '')
       .filter((v) => v.length > 0)
 
-    const { body, mimeType } = GmailClient.extractBodyStatic(message.payload ?? {})
+    const { body, mimeType, textBody } = GmailClient.extractBodyStatic(message.payload ?? {})
 
     return {
       id: message.id ?? '',
@@ -1156,6 +1157,7 @@ export class GmailClient {
       listUnsubscribe: getHeader('list-unsubscribe') ?? undefined,
       body,
       mimeType,
+      textBody,
       attachments: GmailClient.extractAttachmentMetaStatic(message.payload?.parts ?? []),
     }
   }
@@ -1231,26 +1233,31 @@ export class GmailClient {
   private static extractBodyStatic(payload: gmail_v1.Schema$MessagePart): {
     body: string
     mimeType: string
+    textBody: string | null
   } {
     if (payload.body?.data) {
+      const mime = payload.mimeType ?? 'text/plain'
       return {
         body: decodeBase64Url(payload.body.data),
-        mimeType: payload.mimeType ?? 'text/plain',
+        mimeType: mime,
+        textBody: mime === 'text/plain' ? decodeBase64Url(payload.body.data) : null,
       }
     }
 
     if (!payload.parts) {
-      return { body: '', mimeType: 'text/plain' }
+      return { body: '', mimeType: 'text/plain', textBody: null }
     }
 
-    const htmlBody = GmailClient.findBodyPartStatic(payload.parts, 'text/html')
-    if (htmlBody) {
-      return { body: decodeBase64Url(htmlBody), mimeType: 'text/html' }
+    const htmlData = GmailClient.findBodyPartStatic(payload.parts, 'text/html')
+    const textData = GmailClient.findBodyPartStatic(payload.parts, 'text/plain')
+    const textBody = textData ? decodeBase64Url(textData) : null
+
+    if (htmlData) {
+      return { body: decodeBase64Url(htmlData), mimeType: 'text/html', textBody }
     }
 
-    const textBody = GmailClient.findBodyPartStatic(payload.parts, 'text/plain')
-    if (textBody) {
-      return { body: decodeBase64Url(textBody), mimeType: 'text/plain' }
+    if (textData) {
+      return { body: textBody!, mimeType: 'text/plain', textBody }
     }
 
     for (const part of payload.parts) {
@@ -1260,7 +1267,7 @@ export class GmailClient {
       }
     }
 
-    return { body: '', mimeType: 'text/plain' }
+    return { body: '', mimeType: 'text/plain', textBody: null }
   }
 
   private static findBodyPartStatic(parts: gmail_v1.Schema$MessagePart[], mimeType: string): string | null {
