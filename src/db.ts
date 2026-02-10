@@ -77,12 +77,6 @@ async function applySchema(prisma: PrismaClient): Promise<void> {
   for (const statement of statements) {
     await prisma.$executeRawUnsafe(statement)
   }
-
-  // Cleanup removed cache tables so old installs do not retain stale schema/data.
-  // These tables only held TTL-bounded cache entries and are safe to drop.
-  await prisma.$executeRawUnsafe('DROP TABLE IF EXISTS "ThreadList"')
-  await prisma.$executeRawUnsafe('DROP TABLE IF EXISTS "LabelCount"')
-  await prisma.$executeRawUnsafe('DROP TABLE IF EXISTS "CalendarEvent"')
 }
 
 /**
