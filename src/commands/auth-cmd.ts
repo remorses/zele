@@ -4,14 +4,16 @@
 
 import type { Goke } from 'goke'
 import { login, logout, listAccounts, getAuthStatuses } from '../auth.js'
+import { closePrisma } from '../db.js'
 import * as out from '../output.js'
 
 export function registerAuthCommands(cli: Goke) {
   cli
-    .command('login', 'Authenticate with Google (opens browser)')
+    .command('login', 'Authenticate with Google (opens browser). Run in background via tmux for remote/headless environments. The command prints an authorization URL — show it to the user, ask them to complete consent in their browser, then paste back the localhost redirect URL containing the auth code.')
     .action(async () => {
       const { email } = await login()
       out.success(`Authenticated as ${email}`)
+      await closePrisma()
     })
 
   cli

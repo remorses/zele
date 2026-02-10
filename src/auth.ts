@@ -168,10 +168,17 @@ async function getAuthCodeFromBrowser(oauth2Client: OAuth2Client, port: number):
     let server: http.Server | null = null
     let rl: readline.Interface | null = null
 
+    function closeServer() {
+      if (server) {
+        server.closeAllConnections()
+        server.close()
+      }
+    }
+
     function finish(code: string) {
       if (resolved) return
       resolved = true
-      server?.close()
+      closeServer()
       if (rl) {
         rl.close()
         process.stdin.unref()
@@ -182,7 +189,7 @@ async function getAuthCodeFromBrowser(oauth2Client: OAuth2Client, port: number):
     function fail(err: Error) {
       if (resolved) return
       resolved = true
-      server?.close()
+      closeServer()
       rl?.close()
       reject(err)
     }
