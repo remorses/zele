@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- **Auth:** Remove legacy `~/.zele/tokens.json` import path; authentication now uses the SQLite `accounts` table only
+- **Auth:** Drop startup migration hooks from account/client/status loading paths (no backwards-compat token file handling)
+
 ## 0.3.2
 
 - **CLI:** Remove all `--no-cache` flags and corresponding client `noCache` params now that remaining caches are safe-by-default

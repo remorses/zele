@@ -5,14 +5,9 @@
 // instances for one or all accounts.
 // app_id is the Google OAuth client ID used during login, enabling future
 // support for multiple OAuth apps per email.
-// Migration: on first use, if legacy ~/.zele/tokens.json exists, it is
-// imported into the DB and renamed to tokens.json.bak.
 
 import http from 'node:http'
 import readline from 'node:readline'
-import fs from 'node:fs'
-import path from 'node:path'
-import os from 'node:os'
 import { OAuth2Client, type Credentials } from 'google-auth-library'
 import fkill from 'fkill'
 import pc from 'picocolors'
@@ -21,13 +16,6 @@ import { GmailClient } from './gmail-client.js'
 import { CalendarClient } from './calendar-client.js'
 import * as errore from 'errore'
 import { AuthError } from './api-utils.js'
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
-const ZELE_DIR = path.join(os.homedir(), '.zele')
-const LEGACY_TOKENS_FILE = path.join(ZELE_DIR, 'tokens.json')
 
 // ---------------------------------------------------------------------------
 // Known open-source Google OAuth clients (Desktop app type).
@@ -137,58 +125,6 @@ export interface AccountId {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy migration: tokens.json → DB
-// ---------------------------------------------------------------------------
-
-async function migrateLegacyTokens(): Promise<void> {
-  if (!fs.existsSync(LEGACY_TOKENS_FILE)) return
-
-  const prisma = await getPrisma()
-  const count = await prisma.account.count()
-  if (count > 0) {
-    // DB already has accounts — skip migration
-    return
-  }
-
-  try {
-    const data = fs.readFileSync(LEGACY_TOKENS_FILE, 'utf-8')
-    const tokens: Credentials = JSON.parse(data)
-
-    // We need to discover the email for this token
-    const oauth2Client = createOAuth2Client()
-    oauth2Client.setCredentials(tokens)
-
-    // Refresh if expired
-    if (tokens.expiry_date && tokens.expiry_date < Date.now()) {
-      const { credentials } = await oauth2Client.refreshAccessToken()
-      oauth2Client.setCredentials(credentials)
-      Object.assign(tokens, credentials)
-    }
-
-    const client = new GmailClient({ auth: oauth2Client })
-    const profile = errore.unwrap(await client.getProfile(), 'Legacy token migration: failed to get profile')
-    const email = profile.emailAddress
-
-    await prisma.account.create({
-      data: {
-        email,
-        appId: CLIENT_ID,
-        accountStatus: 'active',
-        tokens: JSON.stringify(tokens),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    })
-
-    // Rename old file so we don't migrate again
-    fs.renameSync(LEGACY_TOKENS_FILE, LEGACY_TOKENS_FILE + '.bak')
-    process.stderr.write(pc.green(`Migrated legacy tokens for ${email}`) + '\n')
-  } catch (err) {
-    process.stderr.write(pc.yellow(`Warning: legacy token migration failed: ${err}`) + '\n')
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Browser OAuth flow
 // ---------------------------------------------------------------------------
 
@@ -196,12 +132,10 @@ function extractCodeFromInput(input: string): string | null {
   const trimmed = input.trim()
   if (!trimmed) return null
 
-  try {
-    const url = new URL(trimmed)
+  const url = errore.tryFn(() => new URL(trimmed))
+  if (!(url instanceof Error)) {
     const code = url.searchParams.get('code')
     if (code) return code
-  } catch {
-    // Not a URL
   }
 
   if (trimmed.length > 10 && !trimmed.includes(' ')) {
@@ -218,7 +152,10 @@ async function getAuthCodeFromBrowser(oauth2Client: OAuth2Client, port: number):
     prompt: 'consent',
   })
 
-  await fkill(`:${port}`, { force: true, silent: true }).catch(() => {})
+  await errore.tryAsync({
+    try: () => fkill(`:${port}`, { force: true, silent: true }),
+    catch: (err) => new Error(String(err), { cause: err }),
+  })
 
   process.stderr.write('\n' + pc.bold('1.') + ' Open this URL to authorize:\n\n')
   process.stderr.write('   ' + pc.cyan(pc.underline(authUrl)) + '\n\n')
@@ -339,7 +276,6 @@ export async function logout(email: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function listAccounts(): Promise<AccountId[]> {
-  await migrateLegacyTokens()
   const prisma = await getPrisma()
   const rows = await prisma.account.findMany({ select: { email: true, appId: true } })
   return rows.map((r) => ({ email: r.email, appId: r.appId }))
@@ -390,8 +326,6 @@ async function authenticateAccount(account: AccountId): Promise<OAuth2Client> {
 export async function getClients(
   accounts?: string[],
 ): Promise<Array<{ email: string; appId: string; client: GmailClient }>> {
-  await migrateLegacyTokens()
-
   const allAccounts = await listAccounts()
   if (allAccounts.length === 0) {
     throw new Error('No accounts registered. Run: zele login')
@@ -444,8 +378,6 @@ export async function getClient(
 export async function getCalendarClients(
   accounts?: string[],
 ): Promise<Array<{ email: string; appId: string; client: CalendarClient }>> {
-  await migrateLegacyTokens()
-
   const allAccounts = await listAccounts()
   if (allAccounts.length === 0) {
     throw new Error('No accounts registered. Run: zele login')
@@ -501,7 +433,6 @@ export interface AuthStatus {
 }
 
 export async function getAuthStatuses(): Promise<AuthStatus[]> {
-  await migrateLegacyTokens()
   const prisma = await getPrisma()
   const rows = await prisma.account.findMany()
 
