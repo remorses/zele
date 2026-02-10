@@ -14,6 +14,7 @@ export function registerAuthCommands(cli: Goke) {
       const { email } = await login()
       out.success(`Authenticated as ${email}`)
       await closePrisma()
+      process.exit(0)
     })
 
   cli
