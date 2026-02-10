@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4
+
+- **Attachments:** Change `attachment list` to accept a `thread-id` and list attachments across all messages in the thread
+- **Attachments:** Include `thread_id`, `message_id`, and `attachment_id` in list output so `attachment get` IDs are directly discoverable
+
 ## 0.3.3
 
 - **Auth:** Remove legacy `~/.zele/tokens.json` import path; authentication now uses the SQLite `accounts` table only

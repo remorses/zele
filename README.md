@@ -126,7 +126,7 @@ zele cal freebusy                 # check availability
 ### Attachments
 
 ```bash
-zele attachment list <message-id>
+zele attachment list <thread-id>
 zele attachment get <message-id> <attachment-id>
 ```
 

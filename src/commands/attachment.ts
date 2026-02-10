@@ -1,5 +1,5 @@
 // Attachment commands: list, get (download).
-// Lists attachments for a message and downloads them to disk.
+// Lists attachments for a thread and downloads them to disk.
 // Skips re-download if file already exists with same size (like gogcli).
 
 import type { Goke } from 'goke'
@@ -7,7 +7,6 @@ import { z } from 'zod'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getClient } from '../auth.js'
-import { GmailClient } from '../gmail-client.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 
@@ -17,34 +16,31 @@ export function registerAttachmentCommands(cli: Goke) {
   // =========================================================================
 
   cli
-    .command('attachment list <messageId>', 'List attachments for a message')
-    .action(async (messageId, options) => {
+    .command('attachment list <threadId>', 'List attachments for all messages in a thread')
+    .action(async (threadId, options) => {
       const { client } = await getClient(options.account)
 
-      const msg = await client.getMessage({ messageId })
-      if (msg instanceof Error) return handleCommandError(msg)
-      if ('raw' in msg) {
-        out.error('Cannot list attachments for raw messages')
-        process.exit(1)
-      }
-
-      const attachments = msg.attachments
+      const { parsed: thread } = await client.getThread({ threadId })
+      const attachments = thread.messages.flatMap((msg) =>
+        msg.attachments.map((attachment) => ({
+          thread_id: thread.id,
+          message_id: msg.id,
+          attachment_id: attachment.attachmentId,
+          filename: attachment.filename,
+          type: attachment.mimeType,
+          size: formatSize(attachment.size),
+        })),
+      )
 
       if (attachments.length === 0) {
         out.hint('No attachments')
         return
       }
 
-      out.printList(
-        attachments.map((a) => ({
-          attachment_id: a.attachmentId,
-          filename: a.filename,
-          type: a.mimeType,
-          size: formatSize(a.size),
-        })),
-      )
+      out.printList(attachments)
 
       out.hint(`${attachments.length} attachment(s)`)
+      out.hint('Use: zele attachment get <messageId> <attachmentId>')
     })
 
   // =========================================================================
