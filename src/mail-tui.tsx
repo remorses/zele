@@ -23,14 +23,15 @@ import {
   showToast,
   Toast,
   useNavigation,
-} from '@raycast/api'
-import { showFailureToast, useCachedPromise } from '@raycast/utils'
+  showFailureToast,
+} from 'termcast'
+import { useCachedPromise } from '@raycast/utils'
 import { useState, useMemo, useCallback } from 'react'
 
 import { getClients, getClient, listAccounts } from './auth.js'
 import type { GmailClient, ThreadListItem, ThreadData, ParsedMessage, Sender } from './gmail-client.js'
-import { AuthError, ApiError } from './api-utils.js'
-import { renderEmailBody, formatDate, formatSender } from './output.js'
+import { AuthError, ApiError, isTruthy } from './api-utils.js'
+import { renderEmailBody, replyParser, formatDate, formatSender } from './output.js'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -73,7 +74,7 @@ function dateSection(dateStr: string): string {
 
 const SECTION_ORDER = ['Today', 'Yesterday', 'This Week', 'This Month', 'Older']
 
-function threadStatusIcon(thread: ThreadListItem & { starred?: boolean }): { source: Icon; tintColor: string } {
+function threadStatusIcon(thread: ThreadListItem & { starred?: boolean }): { source: typeof Icon[keyof typeof Icon]; tintColor: string } {
   const unread = thread.unread
   const starred = thread.labelIds?.includes('STARRED') ?? false
 
@@ -87,6 +88,10 @@ function threadStatusIcon(thread: ThreadListItem & { starred?: boolean }): { sou
 interface ThreadItem extends ThreadListItem {
   account: string
 }
+
+type MailCursor =
+  | { mode: 'single'; nextPageToken?: string }
+  | { mode: 'multi'; nextByAccount: Record<string, string | null> }
 
 // ---------------------------------------------------------------------------
 // Data fetching
@@ -473,16 +478,13 @@ export default function Command() {
     revalidate,
   } = useCachedPromise(
     (query: string, account: string) => {
-      // Track page tokens per page for cursor-based pagination
-      const pageTokens: (string | undefined)[] = [undefined]
-      return async ({ page }: { page: number }) => {
+      return async ({ cursor }: { page: number; cursor?: MailCursor }) => {
         const accountFilter = account === 'all' ? undefined : [account]
         const clients = await getClients(accountFilter)
 
-        const pageToken = pageTokens[page]
-
-        // For single account, use cursor-based pagination
-        if (clients.length === 1) {
+        // Single selected account: standard cursor pagination.
+        if (account !== 'all') {
+          const pageToken = cursor?.mode === 'single' ? cursor.nextPageToken : undefined
           const { email, client } = clients[0]!
           const result = await client.listThreads({
             query: query || undefined,
@@ -493,35 +495,71 @@ export default function Command() {
             await showFailureToast(result, { title: 'Failed to fetch emails' })
             return { data: [] as ThreadItem[], hasMore: false }
           }
-          if (result.nextPageToken) {
-            pageTokens[page + 1] = result.nextPageToken
-          }
           const data: ThreadItem[] = result.threads.map((t) => ({ ...t, account: email }))
           return {
             data,
             hasMore: !!result.nextPageToken,
+            cursor: {
+              mode: 'single',
+              nextPageToken: result.nextPageToken ?? undefined,
+            } satisfies MailCursor,
           }
         }
 
-        // Multi-account: fetch from all, merge
+        // Multi-account: keep one token per account and merge sorted pages.
+        const previousByAccount = cursor?.mode === 'multi' ? cursor.nextByAccount : {}
+
         const results = await Promise.all(
           clients.map(async ({ email, client }) => {
+            // null means this account is exhausted and should not be fetched anymore.
+            if (previousByAccount[email] === null) {
+              return {
+                email,
+                result: null as null,
+                nextPageToken: null as string | null,
+              }
+            }
+
             const result = await client.listThreads({
               query: query || undefined,
               maxResults: PAGE_SIZE,
-              pageToken: pageToken || undefined,
+              pageToken: previousByAccount[email] ?? undefined,
             })
-            if (result instanceof Error) return null
-            return { email, result }
+            if (result instanceof Error) {
+              return {
+                email,
+                result: null as null,
+                nextPageToken: null as string | null,
+              }
+            }
+            return {
+              email,
+              result,
+              nextPageToken: result.nextPageToken ?? null,
+            }
           }),
         )
 
-        const merged: ThreadItem[] = results
-          .filter((r): r is NonNullable<typeof r> => r !== null)
+        const successfulResults = results
+          .map((r) => (r.result ? { email: r.email, result: r.result } : null))
+          .filter(isTruthy)
+
+        const merged: ThreadItem[] = successfulResults
           .flatMap(({ email, result }) => result.threads.map((t) => ({ ...t, account: email })))
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
-        return { data: merged, hasMore: false }
+        const nextByAccount: Record<string, string | null> = {}
+        for (const { email, nextPageToken } of results) {
+          nextByAccount[email] = nextPageToken
+        }
+
+        const hasMore = Object.values(nextByAccount).some((token) => token !== null)
+
+        return {
+          data: merged,
+          hasMore,
+          cursor: { mode: 'multi', nextByAccount } satisfies MailCursor,
+        }
       }
     },
     [searchText, selectedAccount],
@@ -597,7 +635,7 @@ export default function Command() {
       searchBarPlaceholder="Search emails..."
       onSearchTextChange={setSearchText}
       throttle
-      pagination={{ hasMore: false, onLoadMore() {}, ...pagination, pageSize: PAGE_SIZE }}
+      pagination={pagination ? { ...pagination, pageSize: PAGE_SIZE } : undefined}
       searchBarAccessory={
         accountList.length > 0 ? (
           <AccountDropdown accounts={accountList} value={selectedAccount} onChange={setSelectedAccount} />
@@ -616,7 +654,7 @@ export default function Command() {
               : threadStatusIcon(thread)
 
             // Accessories
-            const accessories: List.Item.Accessory[] = []
+            const accessories: Array<{ text?: string; tag?: string | { value: string; color?: string }; icon?: string | null }> = []
             if (thread.messageCount > 1) {
               accessories.push({ tag: { value: String(thread.messageCount), color: Color.SecondaryText } })
             }

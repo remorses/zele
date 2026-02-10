@@ -2,7 +2,13 @@
 // Uses inline snapshots to capture how real-world email HTML is converted.
 
 import { expect, test } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { htmlToMarkdown, renderEmailBody, replyParser } from './output.js'
+
+const htmlFixtureDir = fileURLToPath(new URL('./test-fixtures/email-html', import.meta.url))
+const htmlSnapshotDir = fileURLToPath(new URL('./test-fixtures/email-html-snapshots', import.meta.url))
 
 // ---------------------------------------------------------------------------
 // Simple HTML
@@ -1064,4 +1070,24 @@ test('strips Korean reply header (작성)', () => {
   "네, 알겠습니다.
   "
 `)
+})
+
+test('safe real-world HTML fixtures produce stable markdown file snapshots', async () => {
+  fs.mkdirSync(htmlSnapshotDir, { recursive: true })
+
+  const fixtureFiles = fs
+    .readdirSync(htmlFixtureDir)
+    .filter((file) => file.endsWith('.html'))
+    .sort()
+
+  for (const fixtureFile of fixtureFiles) {
+    const html = fs.readFileSync(path.join(htmlFixtureDir, fixtureFile), 'utf-8')
+    const markdown = htmlToMarkdown(html)
+    const snapshotFile = path.join(htmlSnapshotDir, `${fixtureFile}.md`)
+
+    expect(markdown, `no raw entity refs: ${fixtureFile}`).not.toMatch(/&#\d+;|&#x[0-9a-f]+;|&(nbsp|amp|quot|lt|gt);/i)
+    expect(markdown, `no zero-width chars: ${fixtureFile}`).not.toMatch(/[\u200B\u200C\u200D\uFEFF]/)
+
+    await expect(markdown, `fixture: ${fixtureFile}`).toMatchFileSnapshot(snapshotFile)
+  }
 })

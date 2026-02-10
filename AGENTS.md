@@ -6,6 +6,10 @@ to run the cli locally use `tsx src/cli.ts`
 
 do not add manual type annotations to `.action(async ...)` parameters in goke commands; rely on goke option inference.
 
+## type guards
+
+prefer shared generic guards over inline complex filter predicates. use `isTruthy` from `src/api-utils.ts` in `Array.filter()` chains when removing nullable placeholders to keep code readable and type narrowing predictable.
+
 ## mail tui 
 
 the mail-tui.tsx file uses termcast. which is a raycast extension API re implementation for the terminal. it implements basically all raycast APIs but renders as a TUI. termcast command is run globally. running termcast dev will show the tui and refresh it on file changes. global termcast is linked to the kimaki termcast project. you can apply fixes there finding it with kimaki project list if needed.

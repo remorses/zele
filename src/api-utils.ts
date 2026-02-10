@@ -18,6 +18,14 @@ type ExcludeError<T> = T extends Error ? never : T
 /** Extract Error subtypes from a union. Used by mapConcurrent for the error branch. */
 type ExtractError<T> = T extends Error ? T : never
 
+type Falsy = false | 0 | '' | null | undefined
+
+/** Generic truthy type guard for Array.filter() chains.
+ *  Useful to drop null/undefined placeholders while preserving inferred item types. */
+export function isTruthy<T>(value: T): value is Exclude<T, Falsy> {
+  return Boolean(value)
+}
+
 /** Run promises with bounded concurrency.
  *  Error-aware: if any callback returns an Error instance, remaining work is
  *  aborted and that error is returned as a value (no throwing needed).

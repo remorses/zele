@@ -171,8 +171,14 @@ export function registerMailCommands(cli: Goke) {
   cli
     .command('mail read <threadId>', 'Read a full email thread')
     .option('--raw', 'Show raw message (first message only)')
+    .option('--raw-html', 'Show raw HTML body per message (no markdown conversion)')
     .action(async (threadId, options) => {
       const { client } = await getClient(options.account)
+
+      if (options.raw && options.rawHtml) {
+        out.error('--raw and --raw-html cannot be used together')
+        process.exit(1)
+      }
 
       if (options.raw) {
         const { parsed: thread } = await client.getThread({ threadId })
@@ -190,6 +196,16 @@ export function registerMailCommands(cli: Goke) {
 
       if (thread.messages.length === 0) {
         out.hint('No messages in thread')
+        return
+      }
+
+      if (options.rawHtml) {
+        thread.messages.forEach((msg, index) => {
+          console.log(msg.body)
+          if (index < thread.messages.length - 1) {
+            console.log('\n<!-- ZELE_MESSAGE_SEPARATOR -->\n')
+          }
+        })
         return
       }
 

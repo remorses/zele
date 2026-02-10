@@ -139,6 +139,40 @@ function decodeBase64Url(encoded: string) {
   return Buffer.from(base64, 'base64').toString('utf-8')
 }
 
+function decodeHtmlEntities(value: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+  }
+
+  return value.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (match, entity: string) => {
+    if (entity.startsWith('#x') || entity.startsWith('#X')) {
+      const codePoint = Number.parseInt(entity.slice(2), 16)
+      if (!Number.isFinite(codePoint)) return match
+      return String.fromCodePoint(codePoint)
+    }
+
+    if (entity.startsWith('#')) {
+      const codePoint = Number.parseInt(entity.slice(1), 10)
+      if (!Number.isFinite(codePoint)) return match
+      return String.fromCodePoint(codePoint)
+    }
+
+    return namedEntities[entity.toLowerCase()] ?? match
+  })
+}
+
+function sanitizeSnippet(snippet: string): string {
+  return decodeHtmlEntities(snippet)
+    .replace(/[\u00A0\u00AD\u034F\u061C\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function encodeBase64Url(data: string | Buffer) {
   const buf = typeof data === 'string' ? Buffer.from(data) : data
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -1137,7 +1171,7 @@ export class GmailClient {
       id: message.id ?? '',
       threadId: message.threadId ?? '',
       subject: (getHeader('subject') ?? '(no subject)').replace(/"/g, '').trim(),
-      snippet: message.snippet ?? '',
+      snippet: sanitizeSnippet(message.snippet ?? ''),
       from: parseFrom(fromHeader),
       to: toHeader ? parseAddressList(toHeader) : [],
       cc:
@@ -1177,7 +1211,7 @@ export class GmailClient {
     return {
       id: raw.id ?? '',
       historyId: raw.historyId ?? null,
-      snippet: latest?.snippet ?? '',
+      snippet: sanitizeSnippet(latest?.snippet ?? ''),
       subject: (getHeader('subject') ?? '(no subject)').replace(/"/g, '').trim(),
       from: parseFrom(getHeader('from') ?? ''),
       date: getHeader('date') ?? '',
