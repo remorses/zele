@@ -4,7 +4,7 @@
   "description": "Gmail CLI — manage email from your terminal",
   "type": "module",
   "main": "dist/cli.js",
-  "bin": "./dist/cli.js",
+  "bin": "./bin/zele",
   "scripts": {
     "build": "rm -rf dist && tsc",
     "prepublishOnly": "pnpm build",

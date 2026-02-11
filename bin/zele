@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+# Shell launcher for zele CLI.
+# Prefers bun (required for the TUI), falls back to node for non-TUI commands.
+# Uses exec so no child process is spawned — the shell is replaced in-place.
+#
+# Shebang uses "#!/usr/bin/env sh" instead of "#!/bin/sh" so that npm's
+# cmd-shim on Windows captures "sh" as the program name (looked up via PATH)
+# rather than the literal "/bin/sh" path which doesn't exist on Windows.
+# Git for Windows provides sh.exe on PATH, making this work cross-platform.
+
+# Resolve symlink (npm/pnpm create symlinks for bin entries)
+SELF="$0"
+if [ -L "$SELF" ]; then
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+fi
+DIR="$(cd "$(dirname "$SELF")" && pwd)"
+CLI="$DIR/../dist/cli.js"
+
+if command -v bun >/dev/null 2>&1; then
+  exec bun "$CLI" "$@"
+else
+  exec node "$CLI" "$@"
+fi

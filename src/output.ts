@@ -1,7 +1,8 @@
 // Output formatting utilities for zele CLI.
 // Handles YAML output with TTY-aware coloring, date formatting,
 // HTML-to-markdown email conversion (turndown), and stderr hints.
-// Follows gogcli pattern: data to stdout, hints/progress to stderr.
+// Data goes to stdout (console.log), hints/progress/errors to stderr (console.error).
+// Prefer console.log/console.error over raw process.stdout/stderr when possible.
 //
 // All structured data is output as YAML (js-yaml). In TTY mode, keys are
 // colored cyan and values are left at the terminal default. In non-TTY mode,

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 // zele — Gmail CLI built on goke.
 // Entry point: registers all commands, global options, help, and version.
@@ -35,6 +35,22 @@ cli.option(
 cli
   .command('', 'Browse emails in TUI')
   .action(async () => {
+    if (typeof globalThis.Bun === 'undefined') {
+      const pc = await import('picocolors')
+      const isWindows = process.platform === 'win32'
+      const installCmd = isWindows
+        ? 'powershell -c "irm bun.sh/install.ps1 | iex"'
+        : 'curl -fsSL https://bun.sh/install | bash'
+      console.error(
+        pc.default.red('Error: ') +
+          'The TUI requires Bun to run.\n\n' +
+          'Install Bun:\n' +
+          `  ${pc.default.cyan(installCmd)}\n\n` +
+          'Then run:\n' +
+          `  ${pc.default.cyan('zele')}`,
+      )
+      process.exit(1)
+    }
     const { renderWithProviders } = await import('termcast')
     const { default: Command } = await import('./mail-tui.js')
     await renderWithProviders(React.createElement(Command))
