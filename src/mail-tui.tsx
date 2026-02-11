@@ -8,8 +8,9 @@
 // the Raycast UI runtime) but without fetch. gaxios sees window exists → tries
 // window.fetch → gets undefined → "fetchImpl is not a function". Fix: ensure
 // window.fetch is set to the native Bun fetch.
-if (typeof globalThis.fetch === 'function' && typeof (globalThis as any).window?.fetch !== 'function') {
-  ;(globalThis as any).window = { ...(globalThis as any).window, fetch: globalThis.fetch }
+const globalWithWindow = globalThis as unknown as { window?: { fetch?: typeof globalThis.fetch } }
+if (typeof globalThis.fetch === 'function' && typeof globalWithWindow.window?.fetch !== 'function') {
+  globalWithWindow.window = { ...globalWithWindow.window, fetch: globalThis.fetch }
 }
 
 import {
@@ -25,11 +26,11 @@ import {
   useNavigation,
   showFailureToast,
 } from 'termcast'
-import { useCachedPromise } from '@termcast/utils'
+import { useCachedPromise } from '@raycast/utils'
 import { useState, useMemo, useCallback, useEffect } from 'react'
 
-import { getClients, getClient, listAccounts, login, logout } from './auth.js'
-import type { GmailClient, ThreadListItem, ThreadData, ParsedMessage, Sender } from './gmail-client.js'
+import { getClients, getClient, listAccounts, login, logout, type AuthStatus } from './auth.js'
+import type { GmailClient, ThreadListItem, ThreadData } from './gmail-client.js'
 import { AuthError, ApiError, isTruthy } from './api-utils.js'
 import { renderEmailBody, replyParser, formatDate, formatSender } from './output.js'
 
@@ -256,7 +257,7 @@ function ManageAccounts({
 
   return (
     <List navigationTitle="Manage Accounts" isLoading={accounts.isLoading}>
-      {accounts.data?.map((a) => (
+      {accounts.data?.map((a: AuthStatus) => (
         <List.Item
           key={`${a.email}-${a.appId}`}
           title={a.email}
@@ -461,7 +462,7 @@ function ThreadDetail({
   }
 
   const labels = [...new Set(messages.flatMap((m) => m.labelIds))]
-    .filter((l) => !l.startsWith('Label_')) // skip internal IDs
+    .filter((l): l is string => typeof l === 'string' && !l.startsWith('Label_')) // skip internal IDs
     .slice(0, 10)
 
   const latestMsg = messages[messages.length - 1]!
@@ -699,7 +700,7 @@ export default function Command() {
       // Group selected threads by account
       const byAccount = new Map<string, string[]>()
       for (const tid of selectedThreads) {
-        const thread = allThreads.find((t) => t.id === tid)
+        const thread = allThreads.find((t: ThreadItem) => t.id === tid)
         if (!thread) continue
         const list = byAccount.get(thread.account) ?? []
         list.push(tid)
