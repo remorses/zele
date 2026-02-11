@@ -23,6 +23,9 @@ importers:
       email-addresses:
         specifier: ^5.0.0
         version: 5.0.0
+      email-reply-parser:
+        specifier: ^2.3.5
+        version: 2.3.5
       errore:
         specifier: ^0.11.0
         version: 0.11.0
@@ -48,8 +51,8 @@ importers:
         specifier: ^15.0.1
         version: 15.0.1
       termcast:
-        specifier: ^1.3.34
-        version: 1.3.34(@raycast/api@1.104.5(@types/node@25.2.2)(@types/react@19.2.13))(@types/react@19.2.13)(react-devtools-core@7.0.1)(react@19.2.4)(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.19.0)
+        specifier: ^1.3.36
+        version: 1.3.36(@raycast/api@1.104.5(@types/node@25.2.2)(@types/react@19.2.13))(@types/react@19.2.13)(react-devtools-core@7.0.1)(react@19.2.4)(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.19.0)
       ts-ics:
         specifier: ^2.4.0
         version: 2.4.0
@@ -846,43 +849,43 @@ packages:
     resolution: {integrity: sha512-6RD/EuIUGxAYR45nMQg+nw+PqwCXUxkR6Eyn+1fvbVjtb9d+60OPwB77LCRUI4zKNI+n0LOFaMniEdSpb+A7kQ==}
     engines: {node: '>=18.0.0'}
 
-  '@opentui/core-darwin-arm64@0.1.77':
-    resolution: {integrity: sha512-SNqmygCMEsPCW7xWjzCZ5caBf36xaprwVdAnFijGDOuIzLA4iaDa6um8cj3TJh7awenN3NTRsuRc7OuH42UH+g==}
+  '@opentui/core-darwin-arm64@0.1.79':
+    resolution: {integrity: sha512-kgsGniV+DM5G1P3GideyJhvfnthNKcVCAm2mPTIr9InQ3L0gS/Feh7zgwOS/jxDvdlQbOWGKMk2Z3JApeC1MLw==}
     cpu: [arm64]
     os: [darwin]
 
-  '@opentui/core-darwin-x64@0.1.77':
-    resolution: {integrity: sha512-/8fsa03swEHTQt/9NrGm98kemlU+VuTURI/OFZiH53vPDRrOYIYoa4Jyga/H7ZMcG+iFhkq97zIe+0Kw95LGmA==}
+  '@opentui/core-darwin-x64@0.1.79':
+    resolution: {integrity: sha512-OpyAmFqAAKQ2CeFmf/oLWcNksmP6Ryx/3R5dbKXThOudMCeQvfvInJTRbc2jTn9VFpf+Qj4BgHkJg1h90tf/EA==}
     cpu: [x64]
     os: [darwin]
 
-  '@opentui/core-linux-arm64@0.1.77':
-    resolution: {integrity: sha512-QfUXZJPc69OvqoMu+AlLgjqXrwu4IeqcBuUWYMuH8nPTeLsVUc3CBbXdV2lv9UDxWzxzrxdS4ALPaxvmEv9lsQ==}
+  '@opentui/core-linux-arm64@0.1.79':
+    resolution: {integrity: sha512-DCa5YaknS4bWhFt8TMEGH+qmTinyzuY8hoZbO4crtWXAxofPP7Pas76Cwxlvis/PyLffA+pPxAl1l5sUZpsvqw==}
     cpu: [arm64]
     os: [linux]
 
-  '@opentui/core-linux-x64@0.1.77':
-    resolution: {integrity: sha512-Kmfx0yUKnPj67AoXYIgL7qQo0QVsUG5Iw8aRtv6XFzXqa5SzBPhaKkKZ9yHPjOmTalZquUs+9zcCRNKpYYuL7A==}
+  '@opentui/core-linux-x64@0.1.79':
+    resolution: {integrity: sha512-V6xjvFfHh3NGvsuuDae1KHPRZXHMEE8XL0A/GM6v4I4OCC23kDmkK60Vn6OptQwAzwwbz0X0IX+Ut/GQU9qGgA==}
     cpu: [x64]
     os: [linux]
 
-  '@opentui/core-win32-arm64@0.1.77':
-    resolution: {integrity: sha512-HGTscPXc7gdd23Nh1DbzUNjog1I+5IZp95XPtLftGTpjrWs60VcetXcyJqK2rQcXNxewJK5yDyaa5QyMjfEhCQ==}
+  '@opentui/core-win32-arm64@0.1.79':
+    resolution: {integrity: sha512-sPRKnVzOdT5szI59tte7pxwwkYA+07EQN+6miFAvkFuiLmRUngONUD8HVjL7nCnxcPFqxaU4Rvl1y40ST86g8g==}
     cpu: [arm64]
     os: [win32]
 
-  '@opentui/core-win32-x64@0.1.77':
-    resolution: {integrity: sha512-c7GijsbvVgnlzd2murIbwuwrGbcv76KdUw6WlVv7a0vex50z6xJCpv1keGzpe0QfxrZ/6fFEFX7JnwGLno0wjA==}
+  '@opentui/core-win32-x64@0.1.79':
+    resolution: {integrity: sha512-vmQcFTvKf9fqajnDtgU6/uAsiTGwx8//khqHVBmiTEXUsiT792Ki9l8sgNughbuldqG5iZOiF6IaAWU1H67UpA==}
     cpu: [x64]
     os: [win32]
 
-  '@opentui/core@0.1.77':
-    resolution: {integrity: sha512-lE3kabm6jdqK3AuBq+O0zZrXdxt6ulmibTc57sf+AsPny6cmwYHnWI4wD6hcreFiYoQVNVvdiJchVgPtowMlEg==}
+  '@opentui/core@0.1.79':
+    resolution: {integrity: sha512-job/t09w8A/aHb/WuaVbimu5fIffyN+PCuVO5cYhXEg/NkOkC/WdFi80B8bwncR/DBPyLAh6oJ3EG86grOVo5g==}
     peerDependencies:
       web-tree-sitter: 0.25.10
 
-  '@opentui/react@0.1.77':
-    resolution: {integrity: sha512-KBepAzBfdgo9+6Gf89D1KtSJiasNQHLCauJRQkAFGJGsgRoaV9MeChYPtXT+cKfucjcYmj6A3IaGWghpvhGltQ==}
+  '@opentui/react@0.1.79':
+    resolution: {integrity: sha512-qwdk3DHmJuX4gMhIzfhPfHbuYRt8+npCiExrlcSMg2c1JCQfT3pZY4calXuwppNxaEDevuLkytuSpy3zL8IPTg==}
     peerDependencies:
       react: '>=19.0.0'
       react-devtools-core: ^7.0.1
@@ -1206,8 +1209,8 @@ packages:
       '@tanstack/react-query': ^5.90.20
       react: ^18 || ^19
 
-  '@tanstack/react-query@5.90.20':
-    resolution: {integrity: sha512-vXBxa+qeyveVO7OA0jX1z+DeyCA4JKnThKv411jd5SORpBKgkcVnYKCiBgECvADvniBX7tobwBmg01qq9JmMJw==}
+  '@tanstack/react-query@5.90.21':
+    resolution: {integrity: sha512-0Lu6y5t+tvlTJMTO7oh5NSpJfpg/5D41LlThfepTixPYkJ0sE2Jj0m0f6yYqujBwIXlId87e234+MxG3D3g7kg==}
     peerDependencies:
       react: ^18 || ^19
 
@@ -1611,6 +1614,15 @@ packages:
 
   email-addresses@5.0.0:
     resolution: {integrity: sha512-4OIPYlA6JXqtVn8zpHpGiI7vE6EQOAg16aGnDMIAlZVinnoZ8208tW1hAbjWydgN/4PLTT9q+O1K6AH/vALJGw==}
+
+  email-reply-parser@2.3.5:
+    resolution: {integrity: sha512-0giLt6y7TKHrd+X1jxblFiDqGeeQmXalGLBkqjyBBl9O0gT19r2da2zMqNa1wHs3uoMZVesjNPny8+g0YtI5fw==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      re2: 1.22.1
+    peerDependenciesMeta:
+      re2:
+        optional: true
 
   emoji-regex@8.0.0:
     resolution: {integrity: sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==}
@@ -2641,8 +2653,8 @@ packages:
     resolution: {integrity: sha512-+HRtZ40Vc+6YfCDWCeAsixwxJgMbPY4HHuTgzPYH3JXvqHWUlsCfy+ylXlAKhFNcuLp4xVeWeFBUhDk+7KYUvQ==}
     engines: {node: '>=14.16'}
 
-  termcast@1.3.34:
-    resolution: {integrity: sha512-YxaV7g+C6xJEKZ5UYmiijCld1j7D537M2t3/gDLGc7R4mMOrc0eS2u4g6D7ogVe7TgM1eTKRo8Ze4vDQMiExgA==}
+  termcast@1.3.36:
+    resolution: {integrity: sha512-MC993TgZcM2agJ6OHfN+p9vQAikqcEWqn+J9M9d8Dw1thNL2UMwS3+n/b1dNpAhWz7xitZ8TH+hJ8Vtm+yPw0A==}
     hasBin: true
     peerDependencies:
       react: '*'
@@ -3650,25 +3662,25 @@ snapshots:
     transitivePeerDependencies:
       - '@types/node'
 
-  '@opentui/core-darwin-arm64@0.1.77':
+  '@opentui/core-darwin-arm64@0.1.79':
     optional: true
 
-  '@opentui/core-darwin-x64@0.1.77':
+  '@opentui/core-darwin-x64@0.1.79':
     optional: true
 
-  '@opentui/core-linux-arm64@0.1.77':
+  '@opentui/core-linux-arm64@0.1.79':
     optional: true
 
-  '@opentui/core-linux-x64@0.1.77':
+  '@opentui/core-linux-x64@0.1.79':
     optional: true
 
-  '@opentui/core-win32-arm64@0.1.77':
+  '@opentui/core-win32-arm64@0.1.79':
     optional: true
 
-  '@opentui/core-win32-x64@0.1.77':
+  '@opentui/core-win32-x64@0.1.79':
     optional: true
 
-  '@opentui/core@0.1.77(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)':
+  '@opentui/core@0.1.79(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)':
     dependencies:
       bun-ffi-structs: 0.1.2(typescript@5.9.3)
       diff: 8.0.2
@@ -3678,12 +3690,12 @@ snapshots:
       yoga-layout: 3.2.1
     optionalDependencies:
       '@dimforge/rapier2d-simd-compat': 0.17.3
-      '@opentui/core-darwin-arm64': 0.1.77
-      '@opentui/core-darwin-x64': 0.1.77
-      '@opentui/core-linux-arm64': 0.1.77
-      '@opentui/core-linux-x64': 0.1.77
-      '@opentui/core-win32-arm64': 0.1.77
-      '@opentui/core-win32-x64': 0.1.77
+      '@opentui/core-darwin-arm64': 0.1.79
+      '@opentui/core-darwin-x64': 0.1.79
+      '@opentui/core-linux-arm64': 0.1.79
+      '@opentui/core-linux-x64': 0.1.79
+      '@opentui/core-win32-arm64': 0.1.79
+      '@opentui/core-win32-x64': 0.1.79
       bun-webgpu: 0.1.4
       planck: 1.4.3(stage-js@1.0.1)
       three: 0.177.0
@@ -3691,9 +3703,9 @@ snapshots:
       - stage-js
       - typescript
 
-  '@opentui/react@0.1.77(react-devtools-core@7.0.1)(react@19.2.4)(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.19.0)':
+  '@opentui/react@0.1.79(react-devtools-core@7.0.1)(react@19.2.4)(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.19.0)':
     dependencies:
-      '@opentui/core': 0.1.77(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)
+      '@opentui/core': 0.1.79(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)
       react: 19.2.4
       react-devtools-core: 7.0.1
       react-reconciler: 0.32.0(react@19.2.4)
@@ -3970,13 +3982,13 @@ snapshots:
     dependencies:
       '@tanstack/query-core': 5.90.20
 
-  '@tanstack/react-query-persist-client@5.90.22(@tanstack/react-query@5.90.20(react@19.2.4))(react@19.2.4)':
+  '@tanstack/react-query-persist-client@5.90.22(@tanstack/react-query@5.90.21(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@tanstack/query-persist-client-core': 5.91.19
-      '@tanstack/react-query': 5.90.20(react@19.2.4)
+      '@tanstack/react-query': 5.90.21(react@19.2.4)
       react: 19.2.4
 
-  '@tanstack/react-query@5.90.20(react@19.2.4)':
+  '@tanstack/react-query@5.90.21(react@19.2.4)':
     dependencies:
       '@tanstack/query-core': 5.90.20
       react: 19.2.4
@@ -4361,6 +4373,8 @@ snapshots:
       jake: 10.9.4
 
   email-addresses@5.0.0: {}
+
+  email-reply-parser@2.3.5: {}
 
   emoji-regex@8.0.0: {}
 
@@ -5609,13 +5623,13 @@ snapshots:
     dependencies:
       execa: 6.1.0
 
-  termcast@1.3.34(@raycast/api@1.104.5(@types/node@25.2.2)(@types/react@19.2.13))(@types/react@19.2.13)(react-devtools-core@7.0.1)(react@19.2.4)(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.19.0):
+  termcast@1.3.36(@raycast/api@1.104.5(@types/node@25.2.2)(@types/react@19.2.13))(@types/react@19.2.13)(react-devtools-core@7.0.1)(react@19.2.4)(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.19.0):
     dependencies:
-      '@opentui/core': 0.1.77(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)
-      '@opentui/react': 0.1.77(react-devtools-core@7.0.1)(react@19.2.4)(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.19.0)
+      '@opentui/core': 0.1.79(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)
+      '@opentui/react': 0.1.79(react-devtools-core@7.0.1)(react@19.2.4)(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.19.0)
       '@parcel/watcher': 2.5.6
-      '@tanstack/react-query': 5.90.20(react@19.2.4)
-      '@tanstack/react-query-persist-client': 5.90.22(@tanstack/react-query@5.90.20(react@19.2.4))(react@19.2.4)
+      '@tanstack/react-query': 5.90.21(react@19.2.4)
+      '@tanstack/react-query-persist-client': 5.90.22(@tanstack/react-query@5.90.21(react@19.2.4))(react@19.2.4)
       '@termcast/utils': 2.2.2(@raycast/api@1.104.5(@types/node@25.2.2)(@types/react@19.2.13))(react@19.2.4)
       change-case: 5.4.4
       colord: 2.9.3
