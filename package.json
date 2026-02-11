@@ -26,7 +26,6 @@
     "@libsql/client": "^0.15.15",
     "@prisma/adapter-libsql": "^7.3.0",
     "@prisma/client": "^7.3.0",
-    "@raycast/utils": "^2.2.2",
     "@termcast/utils": "^2.2.5",
     "email-addresses": "^5.0.0",
     "email-reply-parser": "^2.3.5",
