@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.6
+
+- **TUI Auth:** Auto-run `zele login` before launching the root TUI command when no accounts are registered
+- **Mail Command:** Auto-run `zele login` before launching `zele mail` TUI when no accounts are registered
+
 ## 0.3.5
 
 - **TUI:** Switch `mail-tui` `useCachedPromise` import from `@raycast/utils` to `@termcast/utils` for Termcast-native compatibility

@@ -7,6 +7,7 @@
 import { goke } from 'goke'
 import { z } from 'zod'
 import React from 'react'
+import { listAccounts, login } from './auth.js'
 import { registerAuthCommands } from './commands/auth-cmd.js'
 import { registerMailCommands } from './commands/mail.js'
 import { registerMailActionCommands } from './commands/mail-actions.js'
@@ -16,6 +17,7 @@ import { registerAttachmentCommands } from './commands/attachment.js'
 import { registerProfileCommands } from './commands/profile.js'
 import { registerCalendarCommands } from './commands/calendar.js'
 import { registerWatchCommands } from './commands/watch.js'
+import { handleCommandError } from './output.js'
 
 const cli = goke('zele')
 
@@ -51,6 +53,13 @@ cli
       )
       process.exit(1)
     }
+
+    const accounts = await listAccounts()
+    if (accounts.length === 0) {
+      const result = await login()
+      if (result instanceof Error) handleCommandError(result)
+    }
+
     const { renderWithProviders } = await import('termcast')
     const { default: Command } = await import('./mail-tui.js')
     await renderWithProviders(React.createElement(Command))
@@ -75,7 +84,7 @@ registerWatchCommands(cli)
 // ---------------------------------------------------------------------------
 
 cli.help()
-cli.version('0.3.5')
+cli.version('0.3.6')
 
 // ---------------------------------------------------------------------------
 // Parse & run
