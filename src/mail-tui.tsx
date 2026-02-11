@@ -28,7 +28,7 @@ import {
 import { useCachedPromise } from '@raycast/utils'
 import { useState, useMemo, useCallback, useEffect } from 'react'
 
-import { getClients, getClient, listAccounts, login } from './auth.js'
+import { getClients, getClient, listAccounts, login, logout } from './auth.js'
 import type { GmailClient, ThreadListItem, ThreadData, ParsedMessage, Sender } from './gmail-client.js'
 import { AuthError, ApiError, isTruthy } from './api-utils.js'
 import { renderEmailBody, replyParser, formatDate, formatSender } from './output.js'
@@ -113,11 +113,13 @@ function AccountDropdown({
   value,
   onChange,
   onAdded,
+  onRemoved,
 }: {
   accounts: { email: string; appId: string }[]
   value: string
   onChange: (value: string) => void
   onAdded?: (email: string) => void | Promise<void>
+  onRemoved?: (email: string) => void | Promise<void>
 }) {
   const { push } = useNavigation()
 
@@ -131,7 +133,7 @@ function AccountDropdown({
           return
         }
         if (newValue === MANAGE_ACCOUNTS) {
-          push(<ManageAccounts onAdded={onAdded} />)
+          push(<ManageAccounts onAdded={onAdded} onRemoved={onRemoved} />)
           return
         }
         onChange(newValue)
@@ -224,14 +226,28 @@ function AddAccount({
 
 function ManageAccounts({
   onAdded,
+  onRemoved,
 }: {
   onAdded?: (email: string) => void | Promise<void>
+  onRemoved?: (email: string) => void | Promise<void>
 }) {
   const accounts = useAccounts()
 
   const handleAdded = async (email: string) => {
     await accounts.revalidate()
     await onAdded?.(email)
+  }
+
+  const handleRemoved = async (email: string) => {
+    const result = await logout(email)
+    if (result instanceof Error) {
+      await showFailureToast(result, { title: `Failed to remove ${email}` })
+      return
+    }
+
+    await accounts.revalidate()
+    await onRemoved?.(email)
+    await showToast({ style: Toast.Style.Success, title: `Removed ${email}` })
   }
 
   return (
@@ -245,6 +261,12 @@ function ManageAccounts({
           actions={
             <ActionPanel>
               <Action.CopyToClipboard title="Copy Email" content={a.email} />
+              <Action
+                title="Logout Account"
+                icon={Icon.Trash}
+                style={Action.Style.Destructive}
+                onAction={() => handleRemoved(a.email)}
+              />
             </ActionPanel>
           }
         />
@@ -623,6 +645,17 @@ export default function Command() {
     [accounts, revalidate],
   )
 
+  const handleAccountRemoved = useCallback(
+    async (email: string) => {
+      await accounts.revalidate()
+      if (selectedAccount === email) {
+        setSelectedAccount('all')
+      }
+      await revalidate()
+    },
+    [accounts, revalidate, selectedAccount],
+  )
+
   const allThreads = threads ?? []
 
   // Group threads into sections
@@ -700,6 +733,7 @@ export default function Command() {
             value={selectedAccount}
             onChange={setSelectedAccount}
             onAdded={handleAccountAdded}
+            onRemoved={handleAccountRemoved}
           />
         ) : undefined
       }

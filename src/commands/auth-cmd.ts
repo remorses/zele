@@ -70,7 +70,8 @@ export function registerAuthCommands(cli: Goke) {
         }
       }
 
-      await logout(targetEmail)
+      const logoutResult = await logout(targetEmail)
+      if (logoutResult instanceof Error) handleCommandError(logoutResult)
       out.success(`Credentials removed for ${targetEmail}`)
     })
 

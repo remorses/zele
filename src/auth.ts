@@ -346,10 +346,14 @@ export async function login(
 // Logout: remove account from DB
 // ---------------------------------------------------------------------------
 
-export async function logout(email: string): Promise<void> {
+export async function logout(email: string): Promise<void | Error> {
   const prisma = await getPrisma()
   // Delete all app_id entries for this email (logout removes all credentials for the email)
-  await prisma.account.deleteMany({ where: { email } })
+  const result = await errore.tryAsync({
+    try: () => prisma.account.deleteMany({ where: { email } }),
+    catch: (err) => new Error(`Failed to remove credentials for ${email}`, { cause: err }),
+  })
+  if (result instanceof Error) return result
 }
 
 // ---------------------------------------------------------------------------
