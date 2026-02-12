@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.12
+
+- **Build:** Fix build script to run `pnpm generate` before TypeScript compilation to ensure Prisma client is generated
+
 ## 0.3.11
 
 - **Code Quality:** Add Prettier configuration and format entire codebase for consistent style
