@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.8
+
+- **Dependencies:** Bump `@opentuah/core` and `@opentuah/react` to `^0.1.90` for latest TUI improvements
+
 ## 0.3.7
 
 - **Auth:** Improve OAuth callback page (dark mode, clearer errors, and copy/paste-friendly next steps)

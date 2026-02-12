@@ -1,6 +1,6 @@
 {
   "name": "zele",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Gmail CLI — manage email from your terminal",
   "type": "module",
   "main": "dist/cli.js",
@@ -24,8 +24,8 @@
   "dependencies": {
     "@googleapis/gmail": "^16.1.1",
     "@libsql/client": "^0.15.15",
-    "@opentui/core": "npm:@opentuah/core@^0.1.88",
-    "@opentui/react": "npm:@opentuah/react@^0.1.88",
+    "@opentui/core": "npm:@opentuah/core@^0.1.90",
+    "@opentui/react": "npm:@opentuah/react@^0.1.90",
     "@prisma/adapter-libsql": "^7.3.0",
     "@prisma/client": "^7.3.0",
     "@termcast/utils": "^2.2.6",
