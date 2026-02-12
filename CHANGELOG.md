@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.9
+
+- **Dependencies:** Remove unused `@opentui/core` and `@opentui/react` dependencies (already provided by termcast)
+
 ## 0.3.8
 
 - **Dependencies:** Bump `@opentuah/core` and `@opentuah/react` to `^0.1.90` for latest TUI improvements
