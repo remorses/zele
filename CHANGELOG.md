@@ -2,7 +2,8 @@
 
 ## 0.3.12
 
-- **Build:** Fix build script to run `pnpm generate` before TypeScript compilation to ensure Prisma client is generated
+- **Build:** Fix build script to run `bun run generate` before TypeScript compilation to ensure Prisma client is generated
+- **Build:** Use bun instead of pnpm in build script to match package manager configuration
 
 ## 0.3.11
 
