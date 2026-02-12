@@ -26,6 +26,7 @@ import {
   useNavigation,
   showFailureToast,
 } from 'termcast'
+import { useTerminalDimensions } from '@opentui/react'
 import { useCachedPromise } from '@termcast/utils'
 import { useState, useMemo, useCallback, useEffect } from 'react'
 
@@ -38,7 +39,9 @@ import { renderEmailBody, replyParser, formatDate, formatSender } from './output
 // Constants
 // ---------------------------------------------------------------------------
 
-const PAGE_SIZE = 25
+const DEFAULT_PAGE_SIZE = 25
+const MIN_PAGE_SIZE = 10
+const VISIBLE_ROWS_OFFSET = 6
 
 const ACCOUNT_COLORS = [Color.Blue, Color.Green, Color.Purple, Color.Orange, Color.Magenta]
 
@@ -83,8 +86,8 @@ function threadStatusIcon(thread: ThreadListItem & { starred?: boolean }): { sou
   const unread = thread.unread
   const starred = thread.labelIds?.includes('STARRED') ?? false
 
-  if (unread && starred) return { source: Icon.Star, tintColor: Color.Yellow }
-  if (unread) return { source: Icon.CircleFilled, tintColor: Color.Blue }
+  if (unread && starred) return { source: Icon.Star, tintColor: Color.Red }
+  if (unread) return { source: Icon.CircleFilled, tintColor: Color.Orange }
   if (starred) return { source: Icon.Star, tintColor: Color.Yellow }
   return { source: Icon.Circle, tintColor: Color.SecondaryText }
 }
@@ -97,6 +100,11 @@ interface ThreadItem extends ThreadListItem {
 type MailCursor =
   | { mode: 'single'; nextPageToken?: string }
   | { mode: 'multi'; nextByAccount: Record<string, string | null> }
+
+function getPageSizeFromTerminalHeight(rows?: number): number {
+  if (typeof rows !== 'number' || rows <= 0) return DEFAULT_PAGE_SIZE
+  return Math.max(MIN_PAGE_SIZE, rows - VISIBLE_ROWS_OFFSET)
+}
 
 // ---------------------------------------------------------------------------
 // Data fetching
@@ -541,6 +549,8 @@ export default function Command() {
   const [searchText, setSearchText] = useState('')
   const [isShowingDetail, setIsShowingDetail] = useState(true)
   const [selectedThreads, setSelectedThreads] = useState<string[]>([])
+  const { height: terminalRows } = useTerminalDimensions()
+  const pageSize = getPageSizeFromTerminalHeight(terminalRows)
 
   const accounts = useAccounts()
   const accountList = accounts.data ?? []
@@ -563,7 +573,7 @@ export default function Command() {
           const { email, client } = clients[0]!
           const result = await client.listThreads({
             query: query || undefined,
-            maxResults: PAGE_SIZE,
+            maxResults: pageSize,
             pageToken: pageToken || undefined,
           })
           if (result instanceof Error) {
@@ -597,7 +607,7 @@ export default function Command() {
 
             const result = await client.listThreads({
               query: query || undefined,
-              maxResults: PAGE_SIZE,
+              maxResults: pageSize,
               pageToken: previousByAccount[email] ?? undefined,
             })
             if (result instanceof Error) {
@@ -637,7 +647,7 @@ export default function Command() {
         }
       }
     },
-    [searchText, selectedAccount],
+    [searchText, selectedAccount, pageSize],
     { keepPreviousData: true },
   )
 
@@ -730,7 +740,7 @@ export default function Command() {
       searchBarPlaceholder="Search emails..."
       onSearchTextChange={setSearchText}
       throttle
-      pagination={pagination ? { ...pagination, pageSize: PAGE_SIZE } : undefined}
+      pagination={pagination ? { ...pagination, pageSize } : undefined}
       searchBarAccessory={
         accountList.length > 0 ? (
           <AccountDropdown
@@ -1044,7 +1054,7 @@ function labelColor(label: string): string {
     case 'TRASH':
       return Color.Red
     case 'UNREAD':
-      return Color.Blue
+      return Color.Orange
     default:
       return Color.SecondaryText
   }
