@@ -6,7 +6,7 @@
   "main": "dist/cli.js",
   "bin": "./bin/zele",
   "scripts": {
-    "build": "rm -rf dist && tsc",
+    "build": "rm -rf dist && pnpm generate && tsc",
     "prepublishOnly": "bun run build",
     "dev": "tsx src/cli.ts",
     "generate": "prisma generate && bun run generate:sql",
