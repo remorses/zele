@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.10
+
+- **Dependencies:** Bump `termcast` to `^1.3.45`
+
 ## 0.3.9
 
 - **Dependencies:** Remove unused `@opentui/core` and `@opentui/react` dependencies (already provided by termcast)
