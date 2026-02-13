@@ -64,7 +64,7 @@ const MIN_PAGE_SIZE = 10
 const VISIBLE_ROWS_OFFSET = 6
 
 /** Spacing mode for the mail list. 'relaxed' renders each item as 3 lines. */
-const LIST_SPACING_MODE: 'relaxed' | 'compact' = 'relaxed'
+const LIST_SPACING_MODE: 'default' | 'relaxed' = 'relaxed'
 const LINES_PER_ITEM = LIST_SPACING_MODE === 'relaxed' ? 3 : 1
 
 const ACCOUNT_COLORS = [
