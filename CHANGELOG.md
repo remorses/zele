@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.13
+
+- **Mail TUI:** Add global mutation loading state for archive, star, trash, and mark read/unread operations
+- **Mail TUI:** Separate action panels for selection mode vs normal mode for clearer UI
+- **Mail TUI:** Fix pagination calculation to account for relaxed list spacing (3 lines per item)
+- **Mail TUI:** Unify reply/forward forms into single ComposeForm with account selector dropdown
+- **Mail TUI:** Clean up account dropdown styling and remove destructive action styles
+- **Gmail Client:** Show other party in thread list instead of own email when user sent latest reply
+- **Gmail Client:** Convert static parse methods to instance methods for simpler code
+- **Dependencies:** Bump termcast to 1.3.47 to fix React reconciler issues on Windows
+
 ## 0.3.12
 
 - **Build:** Fix build script to run `bun run generate` before TypeScript compilation to ensure Prisma client is generated
