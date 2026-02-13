@@ -17,6 +17,7 @@ import { registerAttachmentCommands } from './commands/attachment.js'
 import { registerProfileCommands } from './commands/profile.js'
 import { registerCalendarCommands } from './commands/calendar.js'
 import { registerWatchCommands } from './commands/watch.js'
+import { registerFilterCommands } from './commands/filter.js'
 import { handleCommandError } from './output.js'
 
 const cli = goke('zele')
@@ -78,13 +79,14 @@ registerLabelCommands(cli)
 registerAttachmentCommands(cli)
 registerCalendarCommands(cli)
 registerWatchCommands(cli)
+registerFilterCommands(cli)
 
 // ---------------------------------------------------------------------------
 // Help & version
 // ---------------------------------------------------------------------------
 
 cli.help()
-cli.version('0.3.11')
+cli.version('0.3.13')
 
 // ---------------------------------------------------------------------------
 // Parse & run

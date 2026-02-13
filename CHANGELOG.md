@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.13
+
+- **Filters:** Add `filter list`, `filter create`, `filter delete` commands for managing Gmail filters
+- **Auth:** Add `gmail.settings.basic` scope for filter management
+
 ## 0.3.12
 
 - **Build:** Fix build script to run `bun run generate` before TypeScript compilation to ensure Prisma client is generated

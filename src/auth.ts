@@ -59,9 +59,10 @@ const CLIENT_SECRET =
   process.env.ZELE_CLIENT_SECRET ?? ACTIVE_CLIENT.clientSecret
 
 const SCOPES = [
-  'https://mail.google.com/',                       // Gmail (full)
-  'https://www.googleapis.com/auth/calendar',       // Calendar (full)
-  'https://www.googleapis.com/auth/userinfo.email', // Email identity
+  'https://mail.google.com/',                                  // Gmail (full)
+  'https://www.googleapis.com/auth/gmail.settings.basic',      // Gmail settings (filters)
+  'https://www.googleapis.com/auth/calendar',                  // Calendar (full)
+  'https://www.googleapis.com/auth/userinfo.email',            // Email identity
 ]
 
 // ---------------------------------------------------------------------------

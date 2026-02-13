@@ -995,6 +995,61 @@ export class GmailClient {
   }
 
   // =========================================================================
+  // Filters
+  // =========================================================================
+
+  async listFilters(): Promise<{ parsed: gmail_v1.Schema$Filter[] } | AuthError | ApiError> {
+    const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+      withRetry(() => this.gmail.users.settings.filters.list({ userId: 'me' })),
+    )
+    if (res instanceof Error) return res
+    return { parsed: res.data.filter ?? [] }
+  }
+
+  async createFilter(opts: {
+    from?: string
+    query?: string
+    addLabelIds?: string[]
+    removeLabelIds?: string[]
+  }): Promise<gmail_v1.Schema$Filter | AuthError | ApiError> {
+    const criteria: gmail_v1.Schema$FilterCriteria = {}
+    if (opts.from) criteria.from = opts.from
+    if (opts.query) criteria.query = opts.query
+
+    const action: gmail_v1.Schema$FilterAction = {}
+    if (opts.addLabelIds?.length) action.addLabelIds = opts.addLabelIds
+    if (opts.removeLabelIds?.length) action.removeLabelIds = opts.removeLabelIds
+
+    const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+      withRetry(() =>
+        this.gmail.users.settings.filters.create({
+          userId: 'me',
+          requestBody: { criteria, action },
+        }),
+      ),
+    )
+    if (res instanceof Error) return res
+    return res.data
+  }
+
+  async deleteFilter(filterId: string): Promise<void | AuthError | ApiError> {
+    const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+      withRetry(() =>
+        this.gmail.users.settings.filters.delete({
+          userId: 'me',
+          id: filterId,
+        }),
+      ),
+    )
+    if (res instanceof Error) return res
+  }
+
+  /** Resolve a label name to its ID, auto-creating if missing. Public wrapper for filter commands. */
+  async resolveLabel(nameOrId: string): Promise<string | AuthError | ApiError> {
+    return this.resolveLabelId(nameOrId)
+  }
+
+  // =========================================================================
   // Label counts (unread counts per folder/label)
   // =========================================================================
 
