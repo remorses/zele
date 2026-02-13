@@ -23,19 +23,19 @@ export function registerMailCommands(cli: Goke) {
   // mail (TUI)
   // =========================================================================
 
-  cli
-    .command('mail', 'Browse emails in TUI')
-    .action(async () => {
-      const accounts = await listAccounts()
-      if (accounts.length === 0) {
-        const result = await login()
-        if (result instanceof Error) handleCommandError(result)
-      }
+  // cli
+  //   .command('mail', 'Browse emails in TUI')
+  //   .action(async () => {
+  //     const accounts = await listAccounts()
+  //     if (accounts.length === 0) {
+  //       const result = await login()
+  //       if (result instanceof Error) handleCommandError(result)
+  //     }
 
-      const { renderWithProviders } = await import('termcast')
-      const { default: Command } = await import('../mail-tui.js')
-      await renderWithProviders(React.createElement(Command))
-    })
+  //     const { renderWithProviders } = await import('termcast')
+  //     const { default: Command } = await import('../mail-tui.js')
+  //     await renderWithProviders(React.createElement(Command))
+  //   })
 
   // =========================================================================
   // mail list
@@ -86,7 +86,7 @@ export function registerMailCommands(cli: Goke) {
         .slice(0, max)
 
       if (merged.length === 0) {
-        out.hint('No threads found')
+        out.printList([], { summary: 'No threads found' })
         return
       }
 
@@ -101,9 +101,8 @@ export function registerMailCommands(cli: Goke) {
           date: out.formatDate(t.date),
           messages: t.messageCount,
         })),
+        { summary: `${merged.length} threads (${folder})` },
       )
-
-      out.hint(`${merged.length} threads (${folder})`)
     })
 
   // =========================================================================
@@ -150,7 +149,7 @@ export function registerMailCommands(cli: Goke) {
         .slice(0, max)
 
       if (merged.length === 0) {
-        out.hint(`No results for "${query}"`)
+        out.printList([], { summary: `No results for "${query}"` })
         return
       }
 
@@ -165,9 +164,8 @@ export function registerMailCommands(cli: Goke) {
           date: out.formatDate(t.date),
           messages: t.messageCount,
         })),
+        { summary: `${merged.length} results for "${query}"` },
       )
-
-      out.hint(`${merged.length} results for "${query}"`)
     })
 
   // =========================================================================
