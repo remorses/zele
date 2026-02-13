@@ -35,7 +35,7 @@ import {
   showFailureToast,
 } from 'termcast'
 import { useTerminalDimensions } from '@opentui/react'
-import { useCachedPromise } from '@termcast/utils'
+import { useCachedPromise, useCachedState } from '@termcast/utils'
 import { useState, useMemo, useCallback, useEffect } from 'react'
 
 import {
@@ -691,10 +691,20 @@ function ThreadDetail({
 // Main Command
 // ---------------------------------------------------------------------------
 
+const CACHE_NAMESPACE = 'mail-tui'
+
 export default function Command() {
-  const [selectedAccount, setSelectedAccount] = useState('all')
+  const [selectedAccount, setSelectedAccount] = useCachedState(
+    'selectedAccount',
+    'all',
+    { cacheNamespace: CACHE_NAMESPACE },
+  )
   const [searchText, setSearchText] = useState('')
-  const [isShowingDetail, setIsShowingDetail] = useState(true)
+  const [isShowingDetail, setIsShowingDetail] = useCachedState(
+    'isShowingDetail',
+    true,
+    { cacheNamespace: CACHE_NAMESPACE },
+  )
   const [selectedThreads, setSelectedThreads] = useState<string[]>([])
   const [activeMutations, setActiveMutations] = useState(0)
   const isMutating = activeMutations > 0
