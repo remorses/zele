@@ -694,6 +694,7 @@ function ThreadDetail({
 const CACHE_NAMESPACE = 'mail-tui'
 
 export default function Command() {
+  const { push } = useNavigation()
   const [selectedAccount, setSelectedAccount] = useCachedState(
     'selectedAccount',
     'all',
@@ -1127,17 +1128,25 @@ export default function Command() {
                       // ─────────────────────────────────────────────
                       <>
                         <ActionPanel.Section>
-                          <Action.Push
+                          <Action
                             title='Open Thread'
                             icon={Icon.Eye}
-                            target={
-                              <ThreadDetail
-                                threadId={thread.id}
-                                account={thread.account}
-                                accounts={accountList}
-                                revalidate={revalidate}
-                              />
-                            }
+                            onAction={async () => {
+                              push(
+                                <ThreadDetail
+                                  threadId={thread.id}
+                                  account={thread.account}
+                                  accounts={accountList}
+                                  revalidate={revalidate}
+                                />,
+                              )
+                              if (thread.unread) {
+                                const { client } = await getClient([thread.account])
+                                const result = await client.markAsRead({ threadIds: [thread.id] })
+                                if (result instanceof Error) return
+                                revalidate()
+                              }
+                            }}
                           />
                           <Action
                             title='Select Thread'
