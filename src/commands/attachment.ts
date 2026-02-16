@@ -61,9 +61,18 @@ export function registerAttachmentCommands(cli: Goke) {
       }
 
       const meta = msg.attachments.find((a) => a.attachmentId === attachmentId)
-      const filename = options.filename ?? meta?.filename ?? `${messageId}_${attachmentId.slice(0, 8)}`
+      const fallbackFilename = `${messageId}_${attachmentId.slice(0, 8)}`
+      const rawFilename = options.filename ?? meta?.filename
+      const filename = sanitizeFilename(rawFilename, fallbackFilename)
 
-      const outPath = path.resolve(options.outDir, filename)
+      const outDir = path.resolve(options.outDir)
+      const outPath = path.join(outDir, filename)
+
+      // Security: verify the resolved path is within the output directory
+      if (!outPath.startsWith(outDir + path.sep) && outPath !== outDir) {
+        out.error(`Security error: filename "${rawFilename}" would write outside output directory`)
+        process.exit(1)
+      }
 
       // Check if file already exists with same size (skip re-download)
       if (fs.existsSync(outPath) && meta) {
@@ -100,4 +109,40 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * Sanitize a filename to prevent path traversal and filesystem issues.
+ * - Strips directory components (path traversal prevention)
+ * - Removes null bytes and control characters
+ * - Replaces characters problematic on Windows/macOS/Linux
+ * - Handles Windows reserved names
+ * - Limits length to 255 characters
+ */
+function sanitizeFilename(name: string | undefined, fallback: string): string {
+  if (!name || name.trim().length === 0) return fallback
+
+  let sanitized = name
+    // Strip directory components (critical for path traversal prevention)
+    .split(/[/\\]/).pop() || ''
+    // Remove null bytes and control characters
+    .replace(/[\x00-\x1f]/g, '')
+    // Replace characters problematic across filesystems: < > : " / \ | ? *
+    .replace(/[<>:"/\\|?*]/g, '_')
+    // Trim leading/trailing spaces and dots (problematic on Windows)
+    .replace(/^[\s.]+|[\s.]+$/g, '')
+
+  // Handle Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+  if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(sanitized)) {
+    sanitized = `_${sanitized}`
+  }
+
+  // Limit length (255 is common filesystem limit)
+  if (sanitized.length > 255) {
+    const ext = path.extname(sanitized)
+    const base = sanitized.slice(0, 255 - ext.length)
+    sanitized = base + ext
+  }
+
+  return sanitized.length > 0 ? sanitized : fallback
 }
