@@ -173,6 +173,15 @@ function sanitizeSnippet(snippet: string): string {
     .trim()
 }
 
+/**
+ * Sanitize header values to prevent CRLF injection attacks.
+ * The mimetext library does not sanitize custom header values, so newlines
+ * in In-Reply-To or References could inject arbitrary headers.
+ */
+function sanitizeHeaderValue(value: string): string {
+  return value.replace(/[\r\n]/g, ' ').trim()
+}
+
 function encodeBase64Url(data: string | Buffer) {
   const buf = typeof data === 'string' ? Buffer.from(data) : data
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -1615,7 +1624,7 @@ export class GmailClient {
     })
 
     if (inReplyTo) {
-      msg.setHeader('In-Reply-To', inReplyTo)
+      msg.setHeader('In-Reply-To', sanitizeHeaderValue(inReplyTo))
     }
 
     if (references) {
@@ -1623,6 +1632,7 @@ export class GmailClient {
         .split(' ')
         .filter(Boolean)
         .map((ref) => {
+          ref = sanitizeHeaderValue(ref)
           if (!ref.startsWith('<')) ref = `<${ref}`
           if (!ref.endsWith('>')) ref = `${ref}>`
           return ref
