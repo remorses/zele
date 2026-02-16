@@ -37,6 +37,7 @@
     "google-auth-library": "^10.5.0",
     "js-yaml": "^4.1.1",
     "mimetext": "^3.0.28",
+    "mrmime": "^2.0.1",
     "picocolors": "^1.1.1",
     "react": "^19.2.4",
     "remark": "^15.0.1",
