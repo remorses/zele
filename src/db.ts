@@ -37,8 +37,12 @@ export function getPrisma(): Promise<PrismaClient> {
 }
 
 async function initializePrisma(): Promise<PrismaClient> {
+  // Create directory with restrictive permissions (owner only)
   if (!fs.existsSync(ZELE_DIR)) {
-    fs.mkdirSync(ZELE_DIR, { recursive: true })
+    fs.mkdirSync(ZELE_DIR, { recursive: true, mode: 0o700 })
+  } else {
+    // Ensure existing directory has correct permissions
+    fs.chmodSync(ZELE_DIR, 0o700)
   }
 
   const adapter = new PrismaLibSql({ url: `file:${DB_PATH}` })
@@ -53,6 +57,9 @@ async function initializePrisma(): Promise<PrismaClient> {
 
   // Run schema.sql — uses CREATE TABLE IF NOT EXISTS so it's idempotent
   await applySchema(prisma)
+
+  // Secure database files (owner read/write only)
+  secureDatabase()
 
   prismaInstance = prisma
   return prisma
@@ -83,6 +90,24 @@ async function applySchema(prisma: PrismaClient): Promise<void> {
 
   for (const statement of statements) {
     await prisma.$executeRawUnsafe(statement)
+  }
+}
+
+/**
+ * Set restrictive permissions on database files.
+ * SQLite WAL mode creates additional -wal and -shm files that also need protection.
+ */
+function secureDatabase(): void {
+  const filesToSecure = [
+    DB_PATH,
+    `${DB_PATH}-wal`,
+    `${DB_PATH}-shm`,
+  ]
+
+  for (const filePath of filesToSecure) {
+    if (fs.existsSync(filePath)) {
+      fs.chmodSync(filePath, 0o600)
+    }
   }
 }
 
