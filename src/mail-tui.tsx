@@ -400,10 +400,19 @@ function ComposeForm({ mode, initialAccount, accounts, onSent }: ComposeFormProp
         ? 'Reply All'
         : 'Reply'
 
-  const bodyPlaceholder =
-    mode.type === 'forward'
-      ? 'Add a message (optional)...'
-      : 'Type your reply...'
+  const bodyPlaceholder = mode.type === 'forward'
+    ? `Add a message (optional)...
+
+---
+
+Best,
+Name`
+    : `Type your reply...
+
+---
+
+Best,
+Name`
 
   const handleSubmit = async (values: { to?: string; body?: string }) => {
     // Validate based on mode
