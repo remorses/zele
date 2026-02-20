@@ -214,6 +214,24 @@ function gmailBoundary<T>(email: string, fn: () => Promise<T>) {
   })
 }
 
+/**
+ * Known folder names that map to Gmail system folders/labels.
+ * Used to validate custom label names and prevent query injection.
+ */
+const KNOWN_FOLDERS = new Set([
+  'inbox',
+  'sent',
+  'trash',
+  'bin',
+  'spam',
+  'drafts',
+  'draft',
+  'starred',
+  'archive',
+  'snoozed',
+  'all',
+])
+
 export class GmailClient {
   private gmail: gmail_v1.Gmail
   private labelIdCache: Record<string, string> = {}
@@ -1717,7 +1735,21 @@ export class GmailClient {
 
     // For non-inbox folders, use Gmail search syntax.
     // Caller-provided labelIds are preserved as additional filters.
-    switch (folder) {
+
+    // Normalize folder name to lowercase for consistent matching
+    const normalizedFolder = folder.toLowerCase()
+
+    // Validate custom label names to prevent query injection.
+    // Gmail query operators like "OR", "from:", parentheses, etc. could manipulate search results.
+    // Known folders are handled by the switch cases below; custom labels must be safe characters only.
+    // Slashes are allowed for nested labels (e.g., "work/projects").
+    if (!KNOWN_FOLDERS.has(normalizedFolder) && !/^[\w\/-]+$/.test(normalizedFolder)) {
+      throw new Error(
+        `Invalid folder/label name: "${folder}". Use alphanumeric characters, underscores, hyphens, and slashes only.`,
+      )
+    }
+
+    switch (normalizedFolder) {
       case 'sent':
         q = `in:sent ${q}`.trim()
         break
@@ -1745,8 +1777,8 @@ export class GmailClient {
         q = `in:anywhere ${q}`.trim()
         break
       default:
-        // Treat as a label name
-        q = `label:${folder} ${q}`.trim()
+        // Treat as a label name (use normalized for consistency)
+        q = `label:${normalizedFolder} ${q}`.trim()
         break
     }
 
