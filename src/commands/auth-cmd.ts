@@ -10,7 +10,7 @@ import { handleCommandError } from '../output.js'
 
 export function registerAuthCommands(cli: Goke) {
   cli
-    .command('login', 'Authenticate with Google (opens browser). Run in background via tmux for remote/headless environments. The command prints an authorization URL — show it to the user, ask them to complete consent in their browser, then paste back the localhost redirect URL containing the auth code.')
+    .command('login', 'Authenticate with Google (opens browser). For headless/agent environments, run inside tmux: the command prints an authorization URL to open in a browser, then waits for the localhost redirect URL to be pasted back.')
     .action(async () => {
       const result = await login()
       if (result instanceof Error) handleCommandError(result)

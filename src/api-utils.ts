@@ -133,6 +133,13 @@ export function isAuthLikeError(err: unknown): boolean {
   return msg.includes('Invalid credentials') || msg.includes('Unauthorized') || msg.includes('invalid_grant')
 }
 
+/** Check if an error is specifically about missing OAuth scopes (not expired tokens or revoked access).
+ *  When true, the user needs to `zele login` again to grant the new scope. */
+export function isScopeError(err: unknown): boolean {
+  const msg = String(err)
+  return msg.includes('insufficient authentication scopes') || msg.includes('Insufficient Permission')
+}
+
 
 // ---------------------------------------------------------------------------
 // Rate limit detection
