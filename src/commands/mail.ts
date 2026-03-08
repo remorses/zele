@@ -34,7 +34,7 @@ export function registerMailCommands(cli: Goke) {
     .command('mail list', 'List email threads')
     .option('--folder [folder]', 'Folder to list (inbox, sent, trash, spam, starred, drafts, archive, all) (default: inbox)')
     .option('--max [max]', 'Max results per page (default: 20)')
-    .option('--page <page>', 'Pagination token')
+    .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
     .option('--label <label>', 'Filter by label name')
     .action(async (options) => {
       const folder = options.folder ?? 'inbox'
@@ -90,7 +90,7 @@ export function registerMailCommands(cli: Goke) {
           date: out.formatDate(t.date),
           messages: t.messageCount,
         })),
-        { summary: `${merged.length} threads (${folder})` },
+        { summary: `${merged.length} threads (${folder})`, nextPage: allResults[0]?.result.nextPageToken },
       )
     })
 
@@ -101,7 +101,7 @@ export function registerMailCommands(cli: Goke) {
   cli
     .command('mail search <query>', 'Search email threads using Gmail query syntax (from:, to:, subject:, has:attachment, etc). See https://support.google.com/mail/answer/7190')
     .option('--max [max]', 'Max results (default: 20)')
-    .option('--page <page>', 'Pagination token')
+    .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
     .action(async (query, options) => {
       const max = options.max ? Number(options.max) : 20
       const clients = await getClients(options.account)
@@ -153,7 +153,7 @@ export function registerMailCommands(cli: Goke) {
           date: out.formatDate(t.date),
           messages: t.messageCount,
         })),
-        { summary: `${merged.length} results for "${query}"` },
+        { summary: `${merged.length} results for "${query}"`, nextPage: allResults[0]?.result.nextPageToken },
       )
     })
 

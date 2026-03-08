@@ -21,7 +21,7 @@ export function registerDraftCommands(cli: Goke) {
   cli
     .command('draft list', 'List drafts')
     .option('--max <max>', z.number().default(20).describe('Max results'))
-    .option('--page <page>', z.string().describe('Pagination token'))
+    .option('--page <page>', z.string().describe('Pagination token (requires --account, only works for a single account)'))
     .option('--query <query>', z.string().describe('Search query'))
     .action(async (options) => {
       const clients = await getClients(options.account)
@@ -72,7 +72,7 @@ export function registerDraftCommands(cli: Goke) {
           subject: d.subject,
           date: out.formatDate(d.date),
         })),
-        { summary: `${merged.length} draft(s)` },
+        { summary: `${merged.length} draft(s)`, nextPage: allResults[0]?.result.nextPageToken },
       )
     })
 

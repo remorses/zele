@@ -78,7 +78,7 @@ export function registerCalendarCommands(cli: Goke) {
     .option('--all', 'Fetch from all calendars')
     .option('--query <query>', 'Free text search')
     .option('--max [max]', 'Max results (default: 20)')
-    .option('--page <page>', 'Pagination token')
+    .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
     .action(async (options) => {
       const max = options.max ? Number(options.max) : 20
       const calendarId = options.calendar ?? 'primary'
