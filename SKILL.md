@@ -1,3 +1,12 @@
+---
+name: zele
+description: >
+  Control Gmail and Google Calendar from the terminal. Read, search, send, reply, and forward
+  emails. Create, update, and delete calendar events. Manage drafts, labels, and attachments.
+  Supports multiple Google accounts. Use this skill whenever the user asks to check email,
+  send messages, schedule meetings, or manage their calendar.
+---
+
 # zele — Gmail & Google Calendar CLI
 
 A multi-account Gmail and Google Calendar client. Output is YAML, pipe-friendly.
