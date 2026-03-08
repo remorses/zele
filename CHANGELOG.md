@@ -60,6 +60,11 @@ Name
 - **Gmail Client:** Show other party in thread list instead of own email when user sent latest reply
 - **Gmail Client:** Convert static parse methods to instance methods for simpler code
 - **Dependencies:** Bump termcast to 1.3.47 to fix React reconciler issues on Windows
+## 0.3.13 (fork)
+
+- **Filters:** Add `filter list`, `filter create`, `filter delete` commands for managing Gmail filters
+- **Auth:** Add `gmail.settings.basic` scope for filter management
+
 
 ## 0.3.12
 
