@@ -4,6 +4,7 @@
 // Entry point: registers all commands, global options, help, and version.
 // Uses goke for command parsing with zod schemas for type-safe options.
 
+import { createRequire } from 'node:module'
 import { goke } from 'goke'
 import { z } from 'zod'
 import React from 'react'
@@ -87,7 +88,9 @@ registerFilterCommands(cli)
 // ---------------------------------------------------------------------------
 
 cli.help()
-cli.version('0.3.15')
+const require = createRequire(import.meta.url)
+const { version } = require('../package.json')
+cli.version(version)
 
 // ---------------------------------------------------------------------------
 // Parse & run
