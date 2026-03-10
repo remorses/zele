@@ -278,6 +278,11 @@ export function resolveTimeRange(opts: TimeRangeOptions, tz: string): ResolvedTi
       if (durationMs !== null) {
         const fromDate = new Date(fromStr)
         toStr = new Date(fromDate.getTime() + durationMs).toISOString()
+      } else if (isDateOnly(opts.to)) {
+        // Date-only --to means "through end of that day" (23:59),
+        // consistent with --today/--tomorrow/--week convenience flags.
+        const [y, m, d] = opts.to.split('-').map(Number)
+        toStr = dateToRfc3339(y!, m!, d!, 23, 59, tz)
       } else {
         toStr = parseTimeExpression(opts.to, tz)
       }
