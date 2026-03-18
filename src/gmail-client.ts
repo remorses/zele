@@ -806,7 +806,8 @@ export class GmailClient {
     )
     if (messageIds instanceof Error) return messageIds
     if (messageIds.length === 0) return
-    await this.batchModifyMessages(messageIds, { removeLabelIds: ['UNREAD'] })
+    const mod = await this.batchModifyMessages(messageIds, { removeLabelIds: ['UNREAD'] })
+    if (mod instanceof Error) return mod
     await this.invalidateAfterThreadMutation(threadIds)
   }
 
@@ -816,7 +817,8 @@ export class GmailClient {
     )
     if (messageIds instanceof Error) return messageIds
     if (messageIds.length === 0) return
-    await this.batchModifyMessages(messageIds, { addLabelIds: ['UNREAD'] })
+    const mod = await this.batchModifyMessages(messageIds, { addLabelIds: ['UNREAD'] })
+    if (mod instanceof Error) return mod
     await this.invalidateAfterThreadMutation(threadIds)
   }
 
@@ -824,7 +826,8 @@ export class GmailClient {
     const messageIds = await this.getMessageIdsForThreads(threadIds)
     if (messageIds instanceof Error) return messageIds
     if (messageIds.length === 0) return
-    await this.batchModifyMessages(messageIds, { addLabelIds: ['STARRED'] })
+    const mod = await this.batchModifyMessages(messageIds, { addLabelIds: ['STARRED'] })
+    if (mod instanceof Error) return mod
     await this.invalidateAfterThreadMutation(threadIds)
   }
 
@@ -834,7 +837,8 @@ export class GmailClient {
     )
     if (messageIds instanceof Error) return messageIds
     if (messageIds.length === 0) return
-    await this.batchModifyMessages(messageIds, { removeLabelIds: ['STARRED'] })
+    const mod = await this.batchModifyMessages(messageIds, { removeLabelIds: ['STARRED'] })
+    if (mod instanceof Error) return mod
     await this.invalidateAfterThreadMutation(threadIds)
   }
 
@@ -861,10 +865,11 @@ export class GmailClient {
     if (messageIds instanceof Error) return messageIds
     if (messageIds.length === 0) return
 
-    await this.batchModifyMessages(messageIds, {
+    const mod = await this.batchModifyMessages(messageIds, {
       addLabelIds: resolvedAdd.filter((r): r is string => typeof r === 'string'),
       removeLabelIds: resolvedRemove,
     })
+    if (mod instanceof Error) return mod
     await this.invalidateAfterThreadMutation(threadIds)
   }
 
@@ -892,7 +897,8 @@ export class GmailClient {
     const messageIds = await this.getMessageIdsForThreads(threadIds)
     if (messageIds instanceof Error) return messageIds
     if (messageIds.length === 0) return
-    await this.batchModifyMessages(messageIds, { removeLabelIds: ['INBOX'] })
+    const mod = await this.batchModifyMessages(messageIds, { removeLabelIds: ['INBOX'] })
+    if (mod instanceof Error) return mod
     await this.invalidateAfterThreadMutation(threadIds)
   }
 
@@ -900,7 +906,8 @@ export class GmailClient {
     const messageIds = await this.getMessageIdsForThreads(threadIds)
     if (messageIds instanceof Error) return messageIds
     if (messageIds.length === 0) return
-    await this.batchModifyMessages(messageIds, { addLabelIds: ['SPAM'], removeLabelIds: ['INBOX'] })
+    const mod = await this.batchModifyMessages(messageIds, { addLabelIds: ['SPAM'], removeLabelIds: ['INBOX'] })
+    if (mod instanceof Error) return mod
     await this.invalidateAfterThreadMutation(threadIds)
   }
 
@@ -910,7 +917,8 @@ export class GmailClient {
     )
     if (messageIds instanceof Error) return messageIds
     if (messageIds.length === 0) return
-    await this.batchModifyMessages(messageIds, { removeLabelIds: ['SPAM'], addLabelIds: ['INBOX'] })
+    const mod = await this.batchModifyMessages(messageIds, { removeLabelIds: ['SPAM'], addLabelIds: ['INBOX'] })
+    if (mod instanceof Error) return mod
     await this.invalidateAfterThreadMutation(threadIds)
   }
 
@@ -937,10 +945,11 @@ export class GmailClient {
       const threadIds = res.threads.map((t) => t.id)
       const messageIds = await this.getMessageIdsForThreads(threadIds)
       if (messageIds instanceof Error) return messageIds
-      await this.batchModifyMessages(messageIds, {
+      const mod = await this.batchModifyMessages(messageIds, {
         addLabelIds: ['TRASH'],
         removeLabelIds: ['SPAM', 'INBOX'],
       })
+      if (mod instanceof Error) return mod
 
       totalDeleted += threadIds.length
       pageToken = res.nextPageToken ?? undefined
@@ -1894,22 +1903,25 @@ export class GmailClient {
   private async batchModifyMessages(
     messageIds: string[],
     body: { addLabelIds?: string[]; removeLabelIds?: string[] },
-  ) {
+  ): Promise<void | AuthError | ApiError> {
     if (messageIds.length === 0) return
 
     // Gmail batchModify accepts up to 1000 IDs
     const chunkSize = 1000
     for (let i = 0; i < messageIds.length; i += chunkSize) {
       const chunk = messageIds.slice(i, i + chunkSize)
-      await withRetry(() =>
-        this.gmail.users.messages.batchModify({
-          userId: 'me',
-          requestBody: {
-            ids: chunk,
-            ...body,
-          },
-        }),
+      const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+        withRetry(() =>
+          this.gmail.users.messages.batchModify({
+            userId: 'me',
+            requestBody: {
+              ids: chunk,
+              ...body,
+            },
+          }),
+        ),
       )
+      if (res instanceof Error) return res
     }
   }
 
