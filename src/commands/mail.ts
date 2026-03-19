@@ -26,8 +26,10 @@ const HIDDEN_LABELS = new Set([
   'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS',
 ])
 
-function formatLabels(labelIds: string[]): string {
-  const visible = labelIds.filter((id) => !HIDDEN_LABELS.has(id))
+function formatLabels(labelIds: string[], labelMap?: Map<string, string>): string {
+  const visible = labelIds
+    .filter((id) => !HIDDEN_LABELS.has(id))
+    .map((id) => labelMap?.get(id) ?? id)
   return visible.join(', ')
 }
 
@@ -62,18 +64,22 @@ export function registerMailCommands(cli: Goke) {
         process.exit(1)
       }
 
-      // Fetch from all accounts concurrently
+      // Fetch threads and labels from all accounts concurrently
       const results = await Promise.all(
         clients.map(async ({ email, client }) => {
-          const result = await client.listThreads({
-            folder,
-            maxResults: max,
-            labelIds: options.label ? [options.label] : undefined,
-            pageToken: options.page,
-            query: options.filter,
-          })
+          const [result, labelsResult] = await Promise.all([
+            client.listThreads({
+              folder,
+              maxResults: max,
+              labelIds: options.label ? [options.label] : undefined,
+              pageToken: options.page,
+              query: options.filter,
+            }),
+            client.listLabels(),
+          ])
           if (result instanceof Error) return result
-          return { email, result }
+          const labelMap = labelsResult instanceof Error ? new Map<string, string>() : new Map(labelsResult.parsed.map((l) => [l.id, l.name]))
+          return { email, result, labelMap }
         }),
       )
 
@@ -82,6 +88,10 @@ export function registerMailCommands(cli: Goke) {
           if (r instanceof Error) { out.error(`Failed to fetch: ${r.message}`); return false }
           return true
         })
+
+      // Merge label maps from all accounts
+      const labelMap = new Map<string, string>()
+      for (const r of allResults) for (const [id, name] of r.labelMap) labelMap.set(id, name)
 
       // Merge threads from all accounts, sorted by date descending, capped at max
       const merged = allResults
@@ -101,13 +111,13 @@ export function registerMailCommands(cli: Goke) {
         merged.map((t) => {
           const to = t.to.map((s) => out.formatSender(s)).join(', ')
           const cc = t.cc.map((s) => out.formatSender(s)).join(', ')
-          const labels = formatLabels(t.labelIds)
+          const labels = formatLabels(t.labelIds, labelMap)
           return {
             ...(showAccount ? { account: t.account } : {}),
             id: t.id,
             flags: out.formatFlags(t),
             from: out.formatSender(t.from),
-            to,
+            ...(to ? { to } : {}),
             ...(cc ? { cc } : {}),
             subject: t.subject,
             snippet: t.snippet,
@@ -138,16 +148,20 @@ export function registerMailCommands(cli: Goke) {
         process.exit(1)
       }
 
-      // Search all accounts concurrently
+      // Search all accounts concurrently (fetch labels alongside for name resolution)
       const results = await Promise.all(
         clients.map(async ({ email, client }) => {
-          const result = await client.listThreads({
-            query,
-            maxResults: max,
-            pageToken: options.page,
-          })
+          const [result, labelsResult] = await Promise.all([
+            client.listThreads({
+              query,
+              maxResults: max,
+              pageToken: options.page,
+            }),
+            client.listLabels(),
+          ])
           if (result instanceof Error) return result
-          return { email, result }
+          const labelMap = labelsResult instanceof Error ? new Map<string, string>() : new Map(labelsResult.parsed.map((l) => [l.id, l.name]))
+          return { email, result, labelMap }
         }),
       )
 
@@ -156,6 +170,10 @@ export function registerMailCommands(cli: Goke) {
           if (r instanceof Error) { out.error(`Failed to search: ${r.message}`); return false }
           return true
         })
+
+      // Merge label maps from all accounts
+      const labelMap = new Map<string, string>()
+      for (const r of allResults) for (const [id, name] of r.labelMap) labelMap.set(id, name)
 
       const merged = allResults
         .flatMap(({ email, result }) =>
@@ -174,13 +192,13 @@ export function registerMailCommands(cli: Goke) {
         merged.map((t) => {
           const to = t.to.map((s) => out.formatSender(s)).join(', ')
           const cc = t.cc.map((s) => out.formatSender(s)).join(', ')
-          const labels = formatLabels(t.labelIds)
+          const labels = formatLabels(t.labelIds, labelMap)
           return {
             ...(showAccount ? { account: t.account } : {}),
             id: t.id,
             flags: out.formatFlags(t),
             from: out.formatSender(t.from),
-            to,
+            ...(to ? { to } : {}),
             ...(cc ? { cc } : {}),
             subject: t.subject,
             snippet: t.snippet,

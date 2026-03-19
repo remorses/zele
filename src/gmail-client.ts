@@ -1355,9 +1355,9 @@ export class GmailClient {
       .map((h) => h.value ?? '')
       .filter((v) => v.length > 0)
 
-    // Check if any message in the thread is a reply (has In-Reply-To header)
+    // Check if any non-draft message in the thread is a reply (has In-Reply-To header)
     const inReplyTo =
-      messages
+      nonDraftMessages
         .map(
           (m) =>
             m.payload?.headers?.find((h) => h.name?.toLowerCase() === 'in-reply-to')?.value ??
@@ -1366,7 +1366,7 @@ export class GmailClient {
         .find((v) => v !== null) ?? null
 
     // Check if any message has attachments (non-inline)
-    const hasAttachments = messages.some((m) => this.hasNonInlineAttachments(m.payload?.parts ?? []))
+    const hasAttachments = messages.some((m) => this.hasNonInlineAttachments(m.payload))
 
     // List-Unsubscribe from latest message
     const listUnsubscribe = getHeader('list-unsubscribe') ?? null
@@ -1512,17 +1512,20 @@ export class GmailClient {
     return results
   }
 
-  /** Quick check: does the message part tree contain any non-inline attachments? */
-  private hasNonInlineAttachments(parts: gmail_v1.Schema$MessagePart[]): boolean {
-    for (const part of parts) {
-      if (part.filename && part.filename.length > 0 && part.body?.attachmentId) {
-        const disposition =
-          part.headers?.find((h) => h.name?.toLowerCase() === 'content-disposition')?.value ?? ''
-        const hasContentId = part.headers?.some((h) => h.name?.toLowerCase() === 'content-id')
-        const isInline = disposition.toLowerCase().includes('inline')
-        if (!isInline || !hasContentId) return true
-      }
-      if (part.parts && this.hasNonInlineAttachments(part.parts)) return true
+  /** Quick check: does the message payload tree contain any non-inline attachments?
+   *  Checks the root part itself (some messages have attachment metadata there)
+   *  then recurses into child parts. */
+  private hasNonInlineAttachments(part: gmail_v1.Schema$MessagePart | undefined): boolean {
+    if (!part) return false
+    if (part.filename && part.filename.length > 0 && part.body?.attachmentId) {
+      const disposition =
+        part.headers?.find((h) => h.name?.toLowerCase() === 'content-disposition')?.value ?? ''
+      const hasContentId = part.headers?.some((h) => h.name?.toLowerCase() === 'content-id')
+      const isInline = disposition.toLowerCase().includes('inline')
+      if (!isInline || !hasContentId) return true
+    }
+    for (const child of part.parts ?? []) {
+      if (this.hasNonInlineAttachments(child)) return true
     }
     return false
   }
