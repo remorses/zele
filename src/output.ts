@@ -326,10 +326,17 @@ export function formatSender(sender: { name?: string; email: string }): string {
 // Status indicators
 // ---------------------------------------------------------------------------
 
-export function formatFlags(item: { unread?: boolean; starred?: boolean }): string {
+export function formatFlags(item: {
+  unread?: boolean
+  starred?: boolean
+  hasAttachments?: boolean
+  inReplyTo?: string | null
+}): string {
   const parts: string[] = []
   if (item.starred) parts.push('starred')
   if (item.unread) parts.push('unread')
+  if (item.hasAttachments) parts.push('attachment')
+  if (item.inReplyTo) parts.push('reply')
   return parts.join(', ')
 }
 

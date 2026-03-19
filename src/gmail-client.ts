@@ -78,10 +78,16 @@ export interface ThreadListItem {
   snippet: string
   subject: string
   from: Sender
+  to: Sender[]
+  cc: Sender[]
   date: string
   labelIds: string[]
   unread: boolean
+  starred: boolean
   messageCount: number
+  inReplyTo: string | null
+  hasAttachments: boolean
+  listUnsubscribe: string | null
 }
 
 export interface ThreadListResult {
@@ -1342,16 +1348,47 @@ export class GmailClient {
       }
     }
 
+    // Parse recipients from latest message
+    const toHeader = getHeader('to') ?? ''
+    const ccHeaders = headers
+      .filter((h) => h.name?.toLowerCase() === 'cc')
+      .map((h) => h.value ?? '')
+      .filter((v) => v.length > 0)
+
+    // Check if any message in the thread is a reply (has In-Reply-To header)
+    const inReplyTo =
+      messages
+        .map(
+          (m) =>
+            m.payload?.headers?.find((h) => h.name?.toLowerCase() === 'in-reply-to')?.value ??
+            null,
+        )
+        .find((v) => v !== null) ?? null
+
+    // Check if any message has attachments (non-inline)
+    const hasAttachments = messages.some((m) => this.hasNonInlineAttachments(m.payload?.parts ?? []))
+
+    // List-Unsubscribe from latest message
+    const listUnsubscribe = getHeader('list-unsubscribe') ?? null
+
     return {
       id: raw.id ?? '',
       historyId: raw.historyId ?? null,
       snippet: sanitizeSnippet(latest?.snippet ?? ''),
       subject: (getHeader('subject') ?? '(no subject)').replace(/"/g, '').trim(),
       from: displayFrom,
+      to: toHeader ? parseAddressList(toHeader) : [],
+      cc: ccHeaders.length > 0
+        ? ccHeaders.filter((h) => h.trim().length > 0).flatMap((h) => parseAddressList(h))
+        : [],
       date: getHeader('date') ?? '',
       labelIds: allLabels,
       unread: allLabels.includes('UNREAD'),
+      starred: allLabels.includes('STARRED'),
       messageCount: nonDraftMessages.length,
+      inReplyTo,
+      hasAttachments,
+      listUnsubscribe,
     }
   }
 
@@ -1473,6 +1510,21 @@ export class GmailClient {
     }
 
     return results
+  }
+
+  /** Quick check: does the message part tree contain any non-inline attachments? */
+  private hasNonInlineAttachments(parts: gmail_v1.Schema$MessagePart[]): boolean {
+    for (const part of parts) {
+      if (part.filename && part.filename.length > 0 && part.body?.attachmentId) {
+        const disposition =
+          part.headers?.find((h) => h.name?.toLowerCase() === 'content-disposition')?.value ?? ''
+        const hasContentId = part.headers?.some((h) => h.name?.toLowerCase() === 'content-id')
+        const isInline = disposition.toLowerCase().includes('inline')
+        if (!isInline || !hasContentId) return true
+      }
+      if (part.parts && this.hasNonInlineAttachments(part.parts)) return true
+    }
+    return false
   }
 
   async getEmailAliases(): Promise<Array<{ email: string; name?: string; primary: boolean }> | AuthError | ApiError> {

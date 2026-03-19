@@ -17,6 +17,21 @@ import { handleCommandError } from '../output.js'
 import pc from 'picocolors'
 
 // ---------------------------------------------------------------------------
+// Label formatting — filter out system labels already represented by flags
+// ---------------------------------------------------------------------------
+
+const HIDDEN_LABELS = new Set([
+  'INBOX', 'SENT', 'TRASH', 'SPAM', 'DRAFT', 'UNREAD', 'STARRED',
+  'IMPORTANT', 'CHAT', 'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL',
+  'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS',
+])
+
+function formatLabels(labelIds: string[]): string {
+  const visible = labelIds.filter((id) => !HIDDEN_LABELS.has(id))
+  return visible.join(', ')
+}
+
+// ---------------------------------------------------------------------------
 // Register commands
 // ---------------------------------------------------------------------------
 
@@ -83,15 +98,25 @@ export function registerMailCommands(cli: Goke) {
 
       const showAccount = clients.length > 1
       out.printList(
-        merged.map((t) => ({
-          ...(showAccount ? { account: t.account } : {}),
-          id: t.id,
-          flags: out.formatFlags(t),
-          from: out.formatSender(t.from),
-          subject: t.subject,
-          date: out.formatDate(t.date),
-          messages: t.messageCount,
-        })),
+        merged.map((t) => {
+          const to = t.to.map((s) => out.formatSender(s)).join(', ')
+          const cc = t.cc.map((s) => out.formatSender(s)).join(', ')
+          const labels = formatLabels(t.labelIds)
+          return {
+            ...(showAccount ? { account: t.account } : {}),
+            id: t.id,
+            flags: out.formatFlags(t),
+            from: out.formatSender(t.from),
+            to,
+            ...(cc ? { cc } : {}),
+            subject: t.subject,
+            snippet: t.snippet,
+            date: out.formatDate(t.date),
+            messages: t.messageCount,
+            ...(labels ? { labels } : {}),
+            ...(t.listUnsubscribe ? { unsubscribe: t.listUnsubscribe } : {}),
+          }
+        }),
         { summary: `${merged.length} threads (${folder})`, nextPage: allResults[0]?.result.nextPageToken },
       )
     })
@@ -146,15 +171,25 @@ export function registerMailCommands(cli: Goke) {
 
       const showAccount = clients.length > 1
       out.printList(
-        merged.map((t) => ({
-          ...(showAccount ? { account: t.account } : {}),
-          id: t.id,
-          flags: out.formatFlags(t),
-          from: out.formatSender(t.from),
-          subject: t.subject,
-          date: out.formatDate(t.date),
-          messages: t.messageCount,
-        })),
+        merged.map((t) => {
+          const to = t.to.map((s) => out.formatSender(s)).join(', ')
+          const cc = t.cc.map((s) => out.formatSender(s)).join(', ')
+          const labels = formatLabels(t.labelIds)
+          return {
+            ...(showAccount ? { account: t.account } : {}),
+            id: t.id,
+            flags: out.formatFlags(t),
+            from: out.formatSender(t.from),
+            to,
+            ...(cc ? { cc } : {}),
+            subject: t.subject,
+            snippet: t.snippet,
+            date: out.formatDate(t.date),
+            messages: t.messageCount,
+            ...(labels ? { labels } : {}),
+            ...(t.listUnsubscribe ? { unsubscribe: t.listUnsubscribe } : {}),
+          }
+        }),
         { summary: `${merged.length} results for "${query}"`, nextPage: allResults[0]?.result.nextPageToken },
       )
     })
