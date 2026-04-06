@@ -2,7 +2,7 @@
     <br/>
     <br/>
     <h3>zele</h3>
-    <p>Manage emails & calendar from your terminal. For you and your agents</p>
+    <p>Email & Calendar CLI — Gmail, IMAP/SMTP, Google Calendar. For you and your agents</p>
     <br/>
     <br/>
 </div>
