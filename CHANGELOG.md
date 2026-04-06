@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.3.17
+
+1. **IMAP/SMTP account support** — connect any email provider (Fastmail, Outlook, Gmail app passwords, or any IMAP server) alongside existing Google OAuth accounts:
+
+   ```bash
+   # Fastmail
+   zele login imap \
+     --email you@fastmail.com \
+     --imap-host imap.fastmail.com --imap-port 993 \
+     --smtp-host smtp.fastmail.com --smtp-port 465 \
+     --password "your-app-password"
+
+   # Outlook
+   zele login imap \
+     --email you@outlook.com \
+     --imap-host outlook.office365.com --imap-port 993 \
+     --smtp-host smtp-mail.outlook.com --smtp-port 587 \
+     --password "your-password"
+
+   # IMAP-only (no sending)
+   zele login imap \
+     --email reader@example.com \
+     --imap-host imap.example.com \
+     --password "pass"
+   ```
+
+   All read/write mail commands work with IMAP accounts: `mail list`, `mail read`, `mail search`, `mail send`, `mail reply`, `mail forward`, `mail star`, `mail archive`, `mail trash`, `mail mark-read`, `draft list`, `draft send`, etc. Google-only features (labels, filters, calendar) show a clear error when used with IMAP accounts.
+
+   `mail list` and `mail search` merge results from Google and IMAP accounts automatically. RFC 6154 special-use folder detection means sent/drafts/trash resolve correctly across providers (including Outlook "Sent Items", localized Gmail folders, etc.).
+
+   `whoami` shows account type and capabilities for each connected account.
+
+2. **Email authentication verification (SPF/DKIM/DMARC)** — `mail read` now shows structured auth verdicts per message:
+
+   ```
+   auth: spf=pass dkim=pass dmarc=pass ✓
+   ```
+
+   Use `--verify` to see the raw `Authentication-Results` header. The `authentic` boolean field is useful for agents acting on sensitive emails (e.g. subscription cancellations):
+
+   ```bash
+   zele mail read <thread-id> | yq '.messages[0].auth.authentic'
+   ```
+
 ## 0.3.16
 
 1. **Richer `mail list` / `mail search` output** — threads now show recipient, snippet, labels, and attachment/reply flags alongside the existing from/subject/date:
