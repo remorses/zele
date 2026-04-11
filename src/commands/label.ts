@@ -3,7 +3,7 @@
 // Cache is handled by the client — commands just call methods and use data.
 // Multi-account: list and counts fetch all accounts concurrently and merge.
 
-import type { ZeleCli } from '../cli.js'
+import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
 import { getClients, getGmailClient } from '../auth.js'
 import { AuthError, UnsupportedError } from '../api-utils.js'

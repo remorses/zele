@@ -5,11 +5,11 @@
 // Uses goke for command parsing with zod schemas for type-safe options.
 
 import { createRequire } from 'node:module'
-import type { Goke } from 'goke'
 import { goke } from 'goke'
 import { z } from 'zod'
 import React from 'react'
 import { listAccounts, login } from './auth.js'
+import type { ZeleCli } from './cli-types.js'
 import { registerAuthCommands } from './commands/auth-cmd.js'
 import { registerMailCommands } from './commands/mail.js'
 import { registerMailActionCommands } from './commands/mail-actions.js'
@@ -21,10 +21,6 @@ import { registerCalendarCommands } from './commands/calendar.js'
 import { registerWatchCommands } from './commands/watch.js'
 import { registerFilterCommands } from './commands/filter.js'
 import { handleCommandError } from './output.js'
-
-// Shared goke type including the zele global options so command modules
-// get `options.account` typed inside every `.action()` callback.
-export type ZeleCli = Goke<{ account?: string[] }>
 
 const cli: ZeleCli = goke('zele').option(
   '--account <account>',

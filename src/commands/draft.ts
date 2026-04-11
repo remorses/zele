@@ -3,7 +3,7 @@
 // Cache invalidation is handled by the client (sendDraft invalidates threadLists).
 // Multi-account: list fetches all accounts concurrently and merges by date.
 
-import type { ZeleCli } from '../cli.js'
+import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
 import fs from 'node:fs'
 import { getClients, getClient } from '../auth.js'

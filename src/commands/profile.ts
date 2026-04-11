@@ -3,7 +3,7 @@
 // Cache is handled by the client — commands just call methods and use data.
 // Multi-account: shows all accounts or filtered by --account.
 
-import type { ZeleCli } from '../cli.js'
+import type { ZeleCli } from '../cli-types.js'
 import { getClients } from '../auth.js'
 import type { GmailClient } from '../gmail-client.js'
 import { AuthError } from '../api-utils.js'

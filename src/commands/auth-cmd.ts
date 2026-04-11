@@ -2,7 +2,7 @@
 // Manages authentication for zele (Google OAuth and IMAP/SMTP credentials).
 // Supports multiple accounts: login adds accounts, logout removes one.
 
-import type { ZeleCli } from '../cli.js'
+import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
 import pc from 'picocolors'
 import { login, loginImap, logout, listAccounts, getAuthStatuses } from '../auth.js'

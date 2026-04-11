@@ -3,7 +3,7 @@
 // Cache is handled by the client — commands just call methods and use data.
 // Multi-account: list/search fetch all accounts concurrently and merge by date.
 
-import type { ZeleCli } from '../cli.js'
+import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
 import fs from 'node:fs'
 import path from 'node:path'

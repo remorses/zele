@@ -2,7 +2,7 @@
 // Lists attachments for a thread and downloads them to disk.
 // Skips re-download if file already exists with same size (like gogcli).
 
-import type { ZeleCli } from '../cli.js'
+import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
 import fs from 'node:fs'
 import path from 'node:path'

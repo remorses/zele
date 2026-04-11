@@ -2,7 +2,7 @@
 // Thin CLI wrapper around GmailClient.watchInbox() async generator.
 // Multi-account: watches all accounts concurrently and merges output.
 
-import type { ZeleCli } from '../cli.js'
+import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
 import { getClients } from '../auth.js'
 import type { WatchEvent } from '../gmail-client.js'
