@@ -13,6 +13,7 @@ import { getClients, getClient, listAccounts, login } from '../auth.js'
 import type { ThreadListResult } from '../gmail-client.js'
 import type { GmailClient } from '../gmail-client.js'
 import { AuthError } from '../api-utils.js'
+import { hasUnsubscribeMechanism, hasOneClickUnsubscribe } from '../unsubscribe.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 import pc from 'picocolors'
@@ -120,6 +121,8 @@ export function registerMailCommands(cli: ZeleCli) {
           const to = t.to.map((s) => out.formatSender(s)).join(', ')
           const cc = t.cc.map((s) => out.formatSender(s)).join(', ')
           const labels = formatLabels(t.labelIds, labelMap)
+          const canUnsubscribe = hasUnsubscribeMechanism(t.listUnsubscribe)
+          const oneClick = hasOneClickUnsubscribe(t.listUnsubscribe, t.listUnsubscribePost)
           return {
             ...(showAccount ? { account: t.account } : {}),
             id: t.id,
@@ -132,6 +135,8 @@ export function registerMailCommands(cli: ZeleCli) {
             date: out.formatDate(t.date),
             messages: t.messageCount,
             ...(labels ? { labels } : {}),
+            ...(canUnsubscribe ? { can_unsubscribe: true } : {}),
+            ...(oneClick ? { one_click: true } : {}),
             ...(t.listUnsubscribe ? { unsubscribe: t.listUnsubscribe } : {}),
           }
         }),
@@ -205,6 +210,8 @@ export function registerMailCommands(cli: ZeleCli) {
           const to = t.to.map((s) => out.formatSender(s)).join(', ')
           const cc = t.cc.map((s) => out.formatSender(s)).join(', ')
           const labels = formatLabels(t.labelIds, labelMap)
+          const canUnsubscribe = hasUnsubscribeMechanism(t.listUnsubscribe)
+          const oneClick = hasOneClickUnsubscribe(t.listUnsubscribe, t.listUnsubscribePost)
           return {
             ...(showAccount ? { account: t.account } : {}),
             id: t.id,
@@ -217,6 +224,8 @@ export function registerMailCommands(cli: ZeleCli) {
             date: out.formatDate(t.date),
             messages: t.messageCount,
             ...(labels ? { labels } : {}),
+            ...(canUnsubscribe ? { can_unsubscribe: true } : {}),
+            ...(oneClick ? { one_click: true } : {}),
             ...(t.listUnsubscribe ? { unsubscribe: t.listUnsubscribe } : {}),
           }
         }),

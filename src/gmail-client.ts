@@ -103,6 +103,7 @@ export interface ThreadListItem {
   inReplyTo: string | null
   hasAttachments: boolean
   listUnsubscribe: string | null
+  listUnsubscribePost: string | null
 }
 
 export interface ThreadListResult {
@@ -1399,8 +1400,11 @@ export class GmailClient {
     // Check if any message has attachments (non-inline)
     const hasAttachments = messages.some((m) => this.hasNonInlineAttachments(m.payload))
 
-    // List-Unsubscribe from latest message
+    // List-Unsubscribe / List-Unsubscribe-Post from latest message (RFC 2369 + RFC 8058).
+    // Used by `mail list` to surface can_unsubscribe / one_click booleans and
+    // by `mail unsubscribe` to plan the unsubscribe flow without re-fetching.
     const listUnsubscribe = getHeader('list-unsubscribe') ?? null
+    const listUnsubscribePost = getHeader('list-unsubscribe-post') ?? null
 
     return {
       id: raw.id ?? '',
@@ -1420,6 +1424,7 @@ export class GmailClient {
       inReplyTo,
       hasAttachments,
       listUnsubscribe,
+      listUnsubscribePost,
     }
   }
 

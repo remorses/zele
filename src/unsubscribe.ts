@@ -143,6 +143,33 @@ export function parseListUnsubscribePost(header: string | undefined): boolean {
   return header.replace(/\s+/g, '').toLowerCase() === 'list-unsubscribe=one-click'
 }
 
+/**
+ * Lightweight check for whether a message has any standardized unsubscribe
+ * mechanism advertised. Used by list views that want to surface a
+ * `can_unsubscribe` boolean without building a full plan. Returns true when
+ * List-Unsubscribe contains at least one valid mailto: or http(s): entry.
+ */
+export function hasUnsubscribeMechanism(listUnsubscribe: string | null | undefined): boolean {
+  if (!listUnsubscribe) return false
+  const entries = parseListUnsubscribeEntries(listUnsubscribe)
+  return entries.some((e) => /^(mailto|https?):/i.test(e))
+}
+
+/**
+ * Check whether a message advertises RFC 8058 one-click unsubscribe: both
+ * List-Unsubscribe-Post=One-Click and at least one https: URL in
+ * List-Unsubscribe. Does not check DKIM — the executor is responsible for
+ * that gating at the point of actually POSTing.
+ */
+export function hasOneClickUnsubscribe(
+  listUnsubscribe: string | null | undefined,
+  listUnsubscribePost: string | null | undefined,
+): boolean {
+  if (!parseListUnsubscribePost(listUnsubscribePost ?? undefined)) return false
+  if (!listUnsubscribe) return false
+  return parseListUnsubscribeEntries(listUnsubscribe).some((e) => /^https:/i.test(e))
+}
+
 // ---------------------------------------------------------------------------
 // Planning
 // ---------------------------------------------------------------------------

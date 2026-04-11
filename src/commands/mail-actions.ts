@@ -372,7 +372,7 @@ async function oneClickPost(url: string): Promise<void | UnsubscribeFailedError>
 
   // RFC 8058 §3.1: senders MUST NOT return redirects, so we refuse to follow.
   // `redirect: 'manual'` lets us see 3xx status codes instead of auto-following.
-  // Timeout keeps a slow/unreachable endpoint from hanging the CLI.
+  // 5-second timeout keeps a slow/unreachable endpoint from hanging the CLI.
   const res = await errore.tryAsync({
     try: () =>
       fetch(parsed, {
@@ -380,7 +380,7 @@ async function oneClickPost(url: string): Promise<void | UnsubscribeFailedError>
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'List-Unsubscribe=One-Click',
         redirect: 'manual',
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(5_000),
       }),
     catch: (err) =>
       new UnsubscribeFailedError({
@@ -393,10 +393,17 @@ async function oneClickPost(url: string): Promise<void | UnsubscribeFailedError>
 
   if (res.status >= 200 && res.status < 300) return undefined
   if (res.status >= 300 && res.status < 400) {
-    return new UnsubscribeFailedError({
-      mechanism: 'one-click',
-      reason: `HTTP ${res.status} redirect (RFC 8058 §3.1 forbids redirects from one-click endpoints)`,
-    })
+    // RFC 8058 §3.1 says senders MUST NOT redirect, but many widely-deployed
+    // senders (ConvertKit, SendGrid, Mailchimp) redirect to a "you have been
+    // unsubscribed" confirmation page after processing the POST body. A POST
+    // that was going to be rejected would return 4xx, not 3xx — the server
+    // has to read and act on the body before deciding to redirect — so we
+    // treat 3xx as success with a warning printed to stderr.
+    const location = res.headers.get('location')
+    out.hint(
+      `one-click endpoint returned HTTP ${res.status} redirect${location ? ` → ${location}` : ''} (RFC 8058 §3.1 forbids this, but many senders do it anyway). Treating as success.`,
+    )
+    return undefined
   }
   return new UnsubscribeFailedError({
     mechanism: 'one-click',

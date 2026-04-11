@@ -382,7 +382,11 @@ export class ImapSmtpClient {
               messageCount: 1,
               inReplyTo: env.inReplyTo ?? null,
               hasAttachments: this.hasAttachments(msg),
+              // IMAP list view uses envelope-only fetch, so raw headers aren't
+              // available. List-Unsubscribe stays null in list mode; it's
+              // resolved during getThread() where `source: true` is fetched.
               listUnsubscribe: null,
+              listUnsubscribePost: null,
             })
           }
         }

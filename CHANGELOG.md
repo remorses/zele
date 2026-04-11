@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.19
+
+1. **`can_unsubscribe` and `one_click` fields in `mail list` / `mail search`** — every thread row now shows whether a standardized unsubscribe mechanism is advertised, so you can spot newsletters at a glance:
+
+   ```yaml
+   - id: 19d799bb39a035fc
+     from: Karan at Cartesia <changelog@mail.cartesia.ai>
+     subject: What's Cooking at Cartesia | March 2026
+     can_unsubscribe: true
+     one_click: true
+     unsubscribe: <mailto:...>, <https://app.loops.so/unsubscribe/...>
+   ```
+
+   `can_unsubscribe: true` means the message has a usable `List-Unsubscribe` header (RFC 2369). `one_click: true` additionally means it has a valid RFC 8058 one-click setup (`List-Unsubscribe-Post: List-Unsubscribe=One-Click` plus an `https:` URL). Both fields are omitted when false to keep the output clean. Works for Gmail accounts; IMAP list views use envelope-only fetches so these flags stay off in list mode but still populate correctly on `getThread()`.
+
+2. **`oneClickPost` fetch timeout lowered from 15 s → 5 s** via `AbortSignal.timeout()` so a slow or unreachable unsubscribe endpoint can't hang the CLI.
+
+3. **`mail unsubscribe` tolerates 3xx redirects from real-world senders.** RFC 8058 §3.1 says senders MUST NOT return HTTP redirects, but many widely-deployed senders (ConvertKit, SendGrid, Mailchimp) redirect the POST to a "you have been unsubscribed" confirmation page after processing the body. The CLI now treats 3xx as success with a stderr warning showing the `Location` header, instead of failing. 4xx/5xx responses still fail as before.
+
+4. **Two new helpers in `src/unsubscribe.ts`** — `hasUnsubscribeMechanism()` and `hasOneClickUnsubscribe()` — pure functions that power the new list output without building a full plan. Both covered by new inline-snapshot tests.
+
 ## 0.3.18
 
 1. **`mail unsubscribe <threadId>`** — unsubscribe from mailing list threads using the standard headers (RFC 2369 `List-Unsubscribe` + RFC 8058 `List-Unsubscribe-Post` one-click):

@@ -8,6 +8,8 @@ import {
   parseMailto,
   parseListUnsubscribePost,
   planUnsubscribe,
+  hasUnsubscribeMechanism,
+  hasOneClickUnsubscribe,
 } from './unsubscribe.js'
 
 describe('parseListUnsubscribeEntries', () => {
@@ -437,5 +439,49 @@ describe('planUnsubscribe', () => {
         "warnings": [],
       }
     `)
+  })
+})
+
+describe('hasUnsubscribeMechanism', () => {
+  test('null or empty returns false', () => {
+    expect(hasUnsubscribeMechanism(null)).toMatchInlineSnapshot(`false`)
+    expect(hasUnsubscribeMechanism(undefined)).toMatchInlineSnapshot(`false`)
+    expect(hasUnsubscribeMechanism('')).toMatchInlineSnapshot(`false`)
+  })
+
+  test('mailto: is usable', () => {
+    expect(hasUnsubscribeMechanism('<mailto:u@x.com>')).toMatchInlineSnapshot(`true`)
+  })
+
+  test('https: is usable', () => {
+    expect(hasUnsubscribeMechanism('<https://x.com/u>')).toMatchInlineSnapshot(`true`)
+  })
+
+  test('garbage with no usable scheme returns false', () => {
+    expect(hasUnsubscribeMechanism('<ftp://x.com/u>')).toMatchInlineSnapshot(`false`)
+  })
+})
+
+describe('hasOneClickUnsubscribe', () => {
+  test('both headers with https URL', () => {
+    expect(
+      hasOneClickUnsubscribe('<https://x.com/u>', 'List-Unsubscribe=One-Click'),
+    ).toMatchInlineSnapshot(`true`)
+  })
+
+  test('missing Post header', () => {
+    expect(hasOneClickUnsubscribe('<https://x.com/u>', null)).toMatchInlineSnapshot(`false`)
+  })
+
+  test('missing https URL in List-Unsubscribe', () => {
+    expect(
+      hasOneClickUnsubscribe('<mailto:u@x.com>', 'List-Unsubscribe=One-Click'),
+    ).toMatchInlineSnapshot(`false`)
+  })
+
+  test('http: (non-https) does not qualify', () => {
+    expect(
+      hasOneClickUnsubscribe('<http://x.com/u>', 'List-Unsubscribe=One-Click'),
+    ).toMatchInlineSnapshot(`false`)
   })
 })
