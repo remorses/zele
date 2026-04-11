@@ -275,7 +275,7 @@ All structured data is output as YAML. In TTY mode, keys are colored for readabi
 
 ## For AI agents
 
-**Always run `zele --help` first**, then `zele <command> --help` for subcommand details (e.g. `zele mail send --help`). The help output is the source of truth for commands, options, and flags. Read it in full — never pipe through `head`, `tail`, or `sed` to truncate.
+**Always run `zele --help` first.** The top-level help already contains every subcommand, option, and flag — there is no need to run `zele <command> --help` separately. The help output is the source of truth. Read it in full — never pipe through `head`, `tail`, or `sed` to truncate.
 
 **Never use the TUI.** Running `zele` with no subcommand launches a human-facing terminal UI for browsing email. Agents must use the CLI subcommands (`zele mail list`, `zele cal events`, etc.) which output structured YAML that can be parsed and piped.
 

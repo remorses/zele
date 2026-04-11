@@ -24,14 +24,13 @@ Every time you use zele, you MUST fetch the latest README:
 curl -s https://raw.githubusercontent.com/remorses/zele/main/README.md # NEVER pipe to head/tail, read the full output
 ```
 
-Then also run the CLI help for the specific command you need:
+Then run the CLI help once — it already includes every subcommand, option, and flag:
 
 ```bash
-zele --help              # NEVER pipe to head/tail
-zele <command> --help    # e.g. zele mail send --help
+zele --help # NEVER pipe to head/tail, read the full output
 ```
 
-The README and `--help` output are the source of truth for commands, options, flags, the Google vs IMAP feature matrix, search operators, and the headless login flow.
+The README and `zele --help` output are the source of truth for commands, options, flags, the Google vs IMAP feature matrix, search operators, and the headless login flow.
 
 ## Rules
 
