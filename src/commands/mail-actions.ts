@@ -1,7 +1,7 @@
 // Mail action commands: star, unstar, archive, trash, untrash, mark read/unread, spam, unspam, label modify.
 // Bulk operations on threads — cache invalidation is handled by the client methods.
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { z } from 'zod'
 import { getClient } from '../auth.js'
 import type { GmailClient } from '../gmail-client.js'
@@ -35,7 +35,7 @@ async function bulkAction(
 // Register commands
 // ---------------------------------------------------------------------------
 
-export function registerMailActionCommands(cli: Goke) {
+export function registerMailActionCommands(cli: ZeleCli) {
   cli
     .command('mail star [...threadIds]', 'Star threads')
     .action(async (threadIds, options) => {

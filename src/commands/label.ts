@@ -3,7 +3,7 @@
 // Cache is handled by the client — commands just call methods and use data.
 // Multi-account: list and counts fetch all accounts concurrently and merge.
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { z } from 'zod'
 import { getClients, getGmailClient } from '../auth.js'
 import { AuthError, UnsupportedError } from '../api-utils.js'
@@ -11,7 +11,7 @@ import type { GmailClient } from '../gmail-client.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 
-export function registerLabelCommands(cli: Goke) {
+export function registerLabelCommands(cli: ZeleCli) {
   // =========================================================================
   // label list
   // =========================================================================

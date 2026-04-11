@@ -2,7 +2,7 @@
 // Manages authentication for zele (Google OAuth and IMAP/SMTP credentials).
 // Supports multiple accounts: login adds accounts, logout removes one.
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { z } from 'zod'
 import pc from 'picocolors'
 import { login, loginImap, logout, listAccounts, getAuthStatuses } from '../auth.js'
@@ -10,7 +10,7 @@ import { closePrisma } from '../db.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 
-export function registerAuthCommands(cli: Goke) {
+export function registerAuthCommands(cli: ZeleCli) {
   cli
     .command('login', 'Authenticate with Google (opens browser) or show IMAP/SMTP login instructions')
     .action(async () => {

@@ -1,14 +1,14 @@
 // Filter commands: list, create, delete Gmail filters.
 // Multi-account support via getClients/getClient like label.ts.
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { getClients } from '../auth.js'
 import { AuthError, UnsupportedError, isScopeError } from '../api-utils.js'
 import type { GmailClient } from '../gmail-client.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 
-export function registerFilterCommands(cli: Goke) {
+export function registerFilterCommands(cli: ZeleCli) {
   // =========================================================================
   // filter list
   // =========================================================================

@@ -3,7 +3,7 @@
 // Cache is handled by the client — commands just call methods and use data.
 // Multi-account: list/events fetch all accounts concurrently and merge by start time.
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { z } from 'zod'
 import readline from 'node:readline'
 import { getCalendarClients, getCalendarClient } from '../auth.js'
@@ -17,7 +17,7 @@ import { resolveTimeRange, parseTimeExpression, parseDuration, isDateOnly } from
 // Register commands
 // ---------------------------------------------------------------------------
 
-export function registerCalendarCommands(cli: Goke) {
+export function registerCalendarCommands(cli: ZeleCli) {
   // =========================================================================
   // cal list
   // =========================================================================

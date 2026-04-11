@@ -3,13 +3,13 @@
 // Cache is handled by the client — commands just call methods and use data.
 // Multi-account: shows all accounts or filtered by --account.
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { getClients } from '../auth.js'
 import type { GmailClient } from '../gmail-client.js'
 import { AuthError } from '../api-utils.js'
 import * as out from '../output.js'
 
-export function registerProfileCommands(cli: Goke) {
+export function registerProfileCommands(cli: ZeleCli) {
   cli
     .command('profile', 'Show account info')
     .action(async (options) => {

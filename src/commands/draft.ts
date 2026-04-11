@@ -3,7 +3,7 @@
 // Cache invalidation is handled by the client (sendDraft invalidates threadLists).
 // Multi-account: list fetches all accounts concurrently and merges by date.
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { z } from 'zod'
 import fs from 'node:fs'
 import { getClients, getClient } from '../auth.js'
@@ -14,7 +14,7 @@ import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 import pc from 'picocolors'
 
-export function registerDraftCommands(cli: Goke) {
+export function registerDraftCommands(cli: ZeleCli) {
   // =========================================================================
   // draft list
   // =========================================================================

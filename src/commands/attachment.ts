@@ -2,7 +2,7 @@
 // Lists attachments for a thread and downloads them to disk.
 // Skips re-download if file already exists with same size (like gogcli).
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { z } from 'zod'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -10,7 +10,7 @@ import { getClient } from '../auth.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 
-export function registerAttachmentCommands(cli: Goke) {
+export function registerAttachmentCommands(cli: ZeleCli) {
   // =========================================================================
   // attachment list
   // =========================================================================

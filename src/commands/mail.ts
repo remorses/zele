@@ -3,7 +3,7 @@
 // Cache is handled by the client — commands just call methods and use data.
 // Multi-account: list/search fetch all accounts concurrently and merge by date.
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { z } from 'zod'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -38,7 +38,7 @@ function formatLabels(labelIds: string[], labelMap?: Map<string, string>): strin
 // Register commands
 // ---------------------------------------------------------------------------
 
-export function registerMailCommands(cli: Goke) {
+export function registerMailCommands(cli: ZeleCli) {
   // =========================================================================
   // mail (TUI)
   // =========================================================================
@@ -56,8 +56,11 @@ export function registerMailCommands(cli: Goke) {
     .option('--label <label>', 'Filter by label name')
     .option('--filter <filter>', 'Gmail search filter (e.g. "is:unread", "from:github", "has:attachment")')
     .action(async (options) => {
-      const folder = options.folder ?? 'inbox'
-      const max = options.max ? Number(options.max) : 20
+      // Optional-value flags ([folder] / [max]) surface as string | boolean in goke
+      const folder =
+        typeof options.folder === 'string' ? options.folder : 'inbox'
+      const max =
+        typeof options.max === 'string' ? Number(options.max) : 20
       const clients = await getClients(options.account)
 
       if (options.page && clients.length > 1) {

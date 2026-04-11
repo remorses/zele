@@ -2,7 +2,7 @@
 // Thin CLI wrapper around GmailClient.watchInbox() async generator.
 // Multi-account: watches all accounts concurrently and merges output.
 
-import type { Goke } from 'goke'
+import type { ZeleCli } from '../cli.js'
 import { z } from 'zod'
 import { getClients } from '../auth.js'
 import type { WatchEvent } from '../gmail-client.js'
@@ -13,7 +13,7 @@ import * as out from '../output.js'
 // Register commands
 // ---------------------------------------------------------------------------
 
-export function registerWatchCommands(cli: Goke) {
+export function registerWatchCommands(cli: ZeleCli) {
   cli
     .command('mail watch', 'Watch for new emails (poll via History API)')
     .option('--interval [interval]', z.string().describe('Poll interval in seconds (default: 15)'))
