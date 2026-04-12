@@ -1090,9 +1090,9 @@ export class ImapSmtpClient {
     return {
       id: draftId,
       message: msg,
-      to: msg.to.map((t) => t.email),
-      cc: (msg.cc ?? []).map((c) => c.email),
-      bcc: msg.bcc.map((b) => b.email),
+      to: msg.to,
+      cc: msg.cc ?? [],
+      bcc: msg.bcc,
     }
   }
 
@@ -1101,11 +1101,11 @@ export class ImapSmtpClient {
     const draft = await this.getDraft({ draftId })
 
     const result = await this.sendMessage({
-      to: draft.to.map((email) => ({ email })),
+      to: draft.to,
       subject: draft.message.subject,
       body: draft.message.body,
-      cc: draft.cc.length > 0 ? draft.cc.map((email) => ({ email })) : undefined,
-      bcc: draft.bcc.length > 0 ? draft.bcc.map((email) => ({ email })) : undefined,
+      cc: draft.cc.length > 0 ? draft.cc : undefined,
+      bcc: draft.bcc.length > 0 ? draft.bcc : undefined,
     })
     if (result instanceof Error) return result
 
@@ -1125,6 +1125,168 @@ export class ImapSmtpClient {
       } finally {
         lock.release()
       }
+    })
+  }
+
+  /**
+   * Update an existing draft. IMAP has no native update — we delete the old
+   * draft and APPEND a new message to the Drafts folder.
+   */
+  async updateDraft({
+    draftId,
+    to,
+    subject,
+    body,
+    cc,
+    bcc,
+    fromEmail,
+  }: {
+    draftId: string
+    to: Array<{ name?: string; email: string }>
+    subject: string
+    body: string
+    cc?: Array<{ name?: string; email: string }>
+    bcc?: Array<{ name?: string; email: string }>
+    threadId?: string
+    fromEmail?: string
+    attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
+  }) {
+    // Delete old draft first — check for errors before creating replacement
+    const deleted = await this.deleteDraft({ draftId })
+    if (deleted instanceof Error) return deleted
+
+    // Create new draft with updated content
+    return this.createDraft({ to, subject, body, cc, bcc, fromEmail })
+  }
+
+  /**
+   * Create a draft reply to a thread. Resolves reply-to, reply-all CCs,
+   * and sets In-Reply-To/References headers, then appends to Drafts.
+   */
+  async createDraftReply({
+    threadId,
+    body,
+    replyAll = false,
+    cc,
+    fromEmail,
+  }: {
+    threadId: string
+    body: string
+    replyAll?: boolean
+    cc?: Array<{ email: string }>
+    fromEmail?: string
+  }): Promise<EmptyThreadError | AuthError | ApiError | { id: string; message: { id: string }; threadId: string }> {
+    const thread = await this.getThread({ threadId })
+    if (thread.parsed.messages.length === 0) {
+      return new EmptyThreadError({ threadId })
+    }
+
+    const lastMsg = thread.parsed.messages[thread.parsed.messages.length - 1]!
+    const replyTo = lastMsg.replyTo ?? lastMsg.from.email
+    const to = [{ email: replyTo }]
+
+    let resolvedCc: Array<{ email: string }> | undefined
+    if (replyAll) {
+      const myEmail = this.account.email.toLowerCase()
+      const allRecipients = [
+        ...lastMsg.to.map((r) => r.email),
+        ...(lastMsg.cc?.map((r) => r.email) ?? []),
+      ]
+        .filter((e) => e.toLowerCase() !== myEmail)
+        .filter((e) => e.toLowerCase() !== replyTo.toLowerCase())
+
+      if (allRecipients.length > 0) {
+        resolvedCc = allRecipients.map((e) => ({ email: e }))
+      }
+    }
+
+    if (cc) {
+      resolvedCc = [...(resolvedCc ?? []), ...cc]
+    }
+
+    const refs = [lastMsg.references, lastMsg.messageId].filter(Boolean).join(' ')
+    const subject = lastMsg.subject.startsWith('Re:') ? lastMsg.subject : `Re: ${lastMsg.subject}`
+
+    // Build MIME with reply headers
+    const headers = [
+      `From: ${fromEmail ?? this.account.email}`,
+      `To: ${to.map((r) => r.email).join(', ')}`,
+      `Subject: ${subject}`,
+      `Date: ${new Date().toUTCString()}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: text/plain; charset=utf-8`,
+    ]
+    if (resolvedCc && resolvedCc.length > 0) {
+      headers.push(`Cc: ${resolvedCc.map((r) => r.email).join(', ')}`)
+    }
+    if (lastMsg.messageId) {
+      headers.push(`In-Reply-To: ${lastMsg.messageId}`)
+    }
+    if (refs) {
+      headers.push(`References: ${refs}`)
+    }
+
+    const raw = headers.join('\r\n') + '\r\n\r\n' + body
+    const rawBuffer = Buffer.from(raw)
+
+    const result = await this.withImap(async (client) => {
+      const draftsPath = await this.resolveMailboxPath(client, 'drafts')
+      const appendResult = await client.append(draftsPath, rawBuffer, ['\\Draft', '\\Seen'])
+      const uid = appendResult && typeof appendResult === 'object' && 'uid' in appendResult ? appendResult.uid : undefined
+      return {
+        id: uid ? makeThreadId(draftsPath, uid) : 'unknown',
+        message: { id: 'unknown' },
+        threadId: uid ? makeThreadId(draftsPath, uid) : 'unknown',
+      }
+    })
+    if (result instanceof Error) return result
+    return result
+  }
+
+  /**
+   * Create a draft forwarding a thread. Builds the forwarded-message body
+   * and appends to Drafts folder.
+   */
+  async createDraftForward({
+    threadId,
+    to,
+    body,
+    fromEmail,
+  }: {
+    threadId: string
+    to: Array<{ email: string }>
+    body?: string
+    fromEmail?: string
+  }): Promise<EmptyThreadError | AuthError | ApiError | { id: string; message: { id: string }; threadId: string }> {
+    const thread = await this.getThread({ threadId })
+    if (thread.parsed.messages.length === 0) {
+      return new EmptyThreadError({ threadId })
+    }
+
+    const lastMsg = thread.parsed.messages[thread.parsed.messages.length - 1]!
+    const renderedBody = renderEmailBody(lastMsg.body, lastMsg.mimeType)
+
+    const fromStr = lastMsg.from.name && lastMsg.from.name !== lastMsg.from.email
+      ? `${lastMsg.from.name} <${lastMsg.from.email}>`
+      : lastMsg.from.email
+
+    const fullBody = [
+      body ?? '',
+      '',
+      '---------- Forwarded message ----------',
+      `From: ${fromStr}`,
+      `Date: ${lastMsg.date}`,
+      `Subject: ${lastMsg.subject}`,
+      `To: ${lastMsg.to.map((t) => t.email).join(', ')}`,
+      '',
+      renderedBody,
+    ].join('\n')
+
+    return this.createDraft({
+      to,
+      subject: `Fwd: ${lastMsg.subject}`,
+      body: fullBody,
+      fromEmail,
     })
   }
 

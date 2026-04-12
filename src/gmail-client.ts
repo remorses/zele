@@ -717,7 +717,7 @@ export class GmailClient {
     return res.data
   }
 
-  async getDraft({ draftId }: { draftId: string }): Promise<NotFoundError | AuthError | ApiError | { id: string; message: ParsedMessage; to: string[]; cc: string[]; bcc: string[] }> {
+  async getDraft({ draftId }: { draftId: string }): Promise<NotFoundError | AuthError | ApiError | { id: string; message: ParsedMessage; to: Sender[]; cc: Sender[]; bcc: Sender[] }> {
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() =>
         this.gmail.users.drafts.get({
@@ -732,14 +732,13 @@ export class GmailClient {
     if (!res.data || !res.data.message) return new NotFoundError({ resource: `draft ${draftId}` })
 
     const message = this.parseMessage(res.data.message)
-    const headers = res.data.message.payload?.headers ?? []
 
     return {
       id: res.data.id ?? draftId,
       message,
-      to: this.getHeaderValues(headers, 'to'),
-      cc: this.getHeaderValues(headers, 'cc'),
-      bcc: this.getHeaderValues(headers, 'bcc'),
+      to: message.to,
+      cc: message.cc ?? [],
+      bcc: message.bcc,
     }
   }
 
@@ -816,6 +815,187 @@ export class GmailClient {
         id: draftId,
       }),
     )
+  }
+
+  /**
+   * Update an existing draft. Gmail replaces the entire message content,
+   * so the caller must provide all fields (merge with existing draft before calling).
+   */
+  async updateDraft({
+    draftId,
+    to,
+    subject,
+    body,
+    cc,
+    bcc,
+    threadId,
+    fromEmail,
+    attachments,
+  }: {
+    draftId: string
+    to: Array<{ name?: string; email: string }>
+    subject: string
+    body: string
+    cc?: Array<{ name?: string; email: string }>
+    bcc?: Array<{ name?: string; email: string }>
+    threadId?: string
+    fromEmail?: string
+    attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
+  }) {
+    const raw = this.buildMimeMessage({ to, subject, body, cc, bcc, attachments, fromEmail })
+
+    const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+      withRetry(() =>
+        this.gmail.users.drafts.update({
+          userId: 'me',
+          id: draftId,
+          requestBody: {
+            message: { raw, threadId },
+          },
+        }),
+      ),
+    )
+    if (res instanceof Error) return res
+
+    return res.data
+  }
+
+  /**
+   * Create a draft reply to a thread. Reuses the same reply-to resolution,
+   * reply-all CC computation, and In-Reply-To/References header logic as
+   * replyToThread(), but saves as a draft instead of sending.
+   */
+  async createDraftReply({
+    threadId,
+    body,
+    replyAll = false,
+    cc,
+    fromEmail,
+  }: {
+    threadId: string
+    body: string
+    replyAll?: boolean
+    cc?: Array<{ email: string }>
+    fromEmail?: string
+  }): Promise<EmptyThreadError | AuthError | ApiError | gmail_v1.Schema$Draft> {
+    const { parsed: thread } = await this.getThread({ threadId })
+    if (thread.messages.length === 0) {
+      return new EmptyThreadError({ threadId })
+    }
+
+    const lastMsg = thread.messages[thread.messages.length - 1]!
+
+    const replyTo = lastMsg.replyTo ?? lastMsg.from.email
+    const to = [{ email: replyTo }]
+
+    let resolvedCc: Array<{ email: string }> | undefined
+    if (replyAll) {
+      const profile = await this.getProfile()
+      if (profile instanceof Error) return profile
+      const myEmail = profile.emailAddress.toLowerCase()
+
+      const allRecipients = [
+        ...lastMsg.to.map((r) => r.email),
+        ...(lastMsg.cc?.map((r) => r.email) ?? []),
+      ]
+        .filter((e) => e.toLowerCase() !== myEmail)
+        .filter((e) => e.toLowerCase() !== replyTo.toLowerCase())
+
+      if (allRecipients.length > 0) {
+        resolvedCc = allRecipients.map((e) => ({ email: e }))
+      }
+    }
+
+    if (cc) {
+      resolvedCc = [...(resolvedCc ?? []), ...cc]
+    }
+
+    const refs = [lastMsg.references, lastMsg.messageId].filter(Boolean).join(' ')
+
+    const raw = this.buildMimeMessage({
+      to,
+      subject: lastMsg.subject.startsWith('Re:') ? lastMsg.subject : `Re: ${lastMsg.subject}`,
+      body,
+      cc: resolvedCc,
+      inReplyTo: lastMsg.messageId,
+      references: refs || undefined,
+      fromEmail,
+    })
+
+    const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+      withRetry(() =>
+        this.gmail.users.drafts.create({
+          userId: 'me',
+          requestBody: {
+            message: { raw, threadId },
+          },
+        }),
+      ),
+    )
+    if (res instanceof Error) return res
+
+    return res.data
+  }
+
+  /**
+   * Create a draft forwarding a thread. Reuses the same forwarded-message body
+   * building logic as forwardThread(), but saves as a draft instead of sending.
+   */
+  async createDraftForward({
+    threadId,
+    to,
+    body,
+    fromEmail,
+  }: {
+    threadId: string
+    to: Array<{ email: string }>
+    body?: string
+    fromEmail?: string
+  }): Promise<EmptyThreadError | AuthError | ApiError | gmail_v1.Schema$Draft> {
+    const { parsed: thread } = await this.getThread({ threadId })
+    if (thread.messages.length === 0) {
+      return new EmptyThreadError({ threadId })
+    }
+
+    const lastMsg = thread.messages[thread.messages.length - 1]!
+    const renderedBody = renderEmailBody(lastMsg.body, lastMsg.mimeType)
+
+    const fromStr = lastMsg.from.name && lastMsg.from.name !== lastMsg.from.email
+      ? `${lastMsg.from.name} <${lastMsg.from.email}>`
+      : lastMsg.from.email
+
+    const fullBody = [
+      body ?? '',
+      '',
+      '---------- Forwarded message ----------',
+      `From: ${fromStr}`,
+      `Date: ${lastMsg.date}`,
+      `Subject: ${lastMsg.subject}`,
+      `To: ${lastMsg.to.map((t) => t.email).join(', ')}`,
+      '',
+      renderedBody,
+    ].join('\n')
+
+    const raw = this.buildMimeMessage({
+      to,
+      subject: `Fwd: ${lastMsg.subject}`,
+      body: fullBody,
+      fromEmail,
+    })
+
+    const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+      withRetry(() =>
+        this.gmail.users.drafts.create({
+          userId: 'me',
+          requestBody: {
+            message: { raw, threadId },
+          },
+        }),
+      ),
+    )
+    if (res instanceof Error) return res
+
+    return res.data
   }
 
   // =========================================================================

@@ -89,14 +89,17 @@ export function registerDraftCommands(cli: ZeleCli) {
       const draft = await client.getDraft({ draftId })
       if (draft instanceof Error) handleCommandError(draft)
 
+      const fmtRecipients = (list: Array<{ name?: string; email: string }>) =>
+        list.map((r) => r.name && r.name !== r.email ? `${r.name} <${r.email}>` : r.email).join(', ')
+
       console.log(pc.bold(`Draft: ${draft.message.subject}`))
       console.log(pc.dim(`Draft ID: ${draft.id}`))
-      console.log(`To: ${draft.to.join(', ') || '(none)'}`)
+      console.log(`To: ${fmtRecipients(draft.to) || '(none)'}`)
       if (draft.cc.length > 0) {
-        console.log(`Cc: ${draft.cc.join(', ')}`)
+        console.log(`Cc: ${fmtRecipients(draft.cc)}`)
       }
       if (draft.bcc.length > 0) {
-        console.log(`Bcc: ${draft.bcc.join(', ')}`)
+        console.log(`Bcc: ${fmtRecipients(draft.bcc)}`)
       }
       console.log()
 
@@ -159,6 +162,58 @@ export function registerDraftCommands(cli: ZeleCli) {
 
       out.printYaml(result)
       out.success('Draft created')
+    })
+
+  // =========================================================================
+  // draft update
+  // =========================================================================
+
+  cli
+    .command('draft update <draftId>', 'Update an existing draft')
+    .option('--to <to>', z.string().describe('New recipient email(s), comma-separated'))
+    .option('--subject <subject>', z.string().describe('New subject'))
+    .option('--body <body>', z.string().describe('New body text'))
+    .option('--body-file <bodyFile>', z.string().describe('Read new body from file (use - for stdin)'))
+    .option('--cc <cc>', z.string().describe('New CC recipients (comma-separated)'))
+    .option('--bcc <bcc>', z.string().describe('New BCC recipients (comma-separated)'))
+    .option('--from <from>', z.string().describe('Send-as alias email'))
+    .action(async (draftId, options) => {
+      const { client } = await getClient(options.account)
+
+      // Fetch existing draft to merge unchanged fields
+      const existing = await client.getDraft({ draftId })
+      if (existing instanceof Error) handleCommandError(existing)
+
+      let body = options.body
+      if (options.bodyFile) {
+        if (options.bodyFile === '-') {
+          const chunks: Buffer[] = []
+          for await (const chunk of process.stdin) {
+            chunks.push(chunk)
+          }
+          body = Buffer.concat(chunks).toString('utf-8')
+        } else {
+          body = fs.readFileSync(options.bodyFile, 'utf-8')
+        }
+      }
+
+      const parseEmails = (str: string) =>
+        str.split(',').map((e) => e.trim()).filter(Boolean).map((email) => ({ email }))
+
+      const result = await client.updateDraft({
+        draftId,
+        to: options.to ? parseEmails(options.to) : existing.to,
+        subject: options.subject ?? existing.message.subject,
+        body: body ?? existing.message.body,
+        cc: options.cc ? parseEmails(options.cc) : existing.cc,
+        bcc: options.bcc ? parseEmails(options.bcc) : existing.bcc,
+        threadId: existing.message.threadId || undefined,
+        fromEmail: options.from ?? existing.message.from.email,
+      })
+      if (result instanceof Error) handleCommandError(result)
+
+      out.printYaml(result)
+      out.success('Draft updated')
     })
 
   // =========================================================================

@@ -471,6 +471,7 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--cc <cc>', z.string().describe('Additional CC recipients'))
     .option('--all', 'Reply all (include all original recipients)')
     .option('--from <from>', z.string().describe('Send-as alias email'))
+    .option('--draft', 'Save as draft instead of sending')
     .action(async (threadId, options) => {
       let body = options.body ?? ''
       if (options.bodyFile) {
@@ -496,6 +497,21 @@ export function registerMailCommands(cli: ZeleCli) {
         ? options.cc.split(',').map((e: string) => ({ email: e.trim() })).filter((e: { email: string }) => e.email)
         : undefined
 
+      if (options.draft) {
+        const result = await client.createDraftReply({
+          threadId,
+          body,
+          replyAll: options.all,
+          cc,
+          fromEmail: options.from,
+        })
+        if (result instanceof Error) handleCommandError(result)
+
+        out.printYaml(result)
+        out.success('Reply draft created')
+        return
+      }
+
       const result = await client.replyToThread({
         threadId,
         body,
@@ -518,6 +534,7 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--to <to>', z.string().describe('Forward recipient(s), comma-separated'))
     .option('--body <body>', z.string().describe('Optional message to prepend'))
     .option('--from <from>', z.string().describe('Send-as alias email'))
+    .option('--draft', 'Save as draft instead of sending')
     .action(async (threadId, options) => {
       if (!options.to) {
         out.error('--to is required')
@@ -530,6 +547,20 @@ export function registerMailCommands(cli: ZeleCli) {
         .filter((e: { email: string }) => e.email)
 
       const { client } = await getClient(options.account)
+
+      if (options.draft) {
+        const result = await client.createDraftForward({
+          threadId,
+          to: recipients,
+          body: options.body,
+          fromEmail: options.from,
+        })
+        if (result instanceof Error) handleCommandError(result)
+
+        out.printYaml(result)
+        out.success('Forward draft created')
+        return
+      }
 
       const result = await client.forwardThread({
         threadId,
