@@ -100,9 +100,11 @@ zele logout         # remove credentials
 ### Mail
 
 ```bash
-zele mail list                    # list recent threads
-zele mail list --filter "is:unread"  # only unread threads
-zele mail search "from:github"   # search with Gmail query syntax
+zele mail list                           # list recent threads
+zele mail list --filter "is:unread"      # only unread threads
+zele mail list --limit 5                 # show only 5 threads
+zele mail search "from:github"           # search with Gmail query syntax
+zele mail search "from:github" --limit 50  # search with more results
 zele mail read <thread-id>       # read a thread
 zele mail send                    # send an email
 zele mail reply <thread-id>      # reply to a thread
@@ -176,7 +178,7 @@ For **Google accounts**, `mail search` and `mail list --filter` use [Gmail searc
 zele mail list --filter "is:unread"
 zele mail list --filter "from:github newer_than:7d" --folder sent
 zele mail search "from:github is:unread newer_than:7d"
-zele mail watch --query "from:github has:attachment"
+zele mail watch --filter "from:github has:attachment"
 ```
 
 ### Drafts

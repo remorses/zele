@@ -76,11 +76,11 @@ export function registerCalendarCommands(cli: ZeleCli) {
     .option('--week', 'Show this week')
     .option('--days <days>', z.number().describe('Show next N days'))
     .option('--all', 'Fetch from all calendars')
-    .option('--query <query>', 'Free text search')
-    .option('--max [max]', 'Max results (default: 20)')
+    .option('--filter <filter>', 'Free text search')
+    .option('--limit [limit]', 'Max results (default: 20)')
     .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
     .action(async (options) => {
-      const max = options.max ? Number(options.max) : 20
+      const limit = options.limit ? Number(options.limit) : 20
       const calendarId = options.calendar ?? 'primary'
 
       if (options.all && options.calendar) {
@@ -122,8 +122,8 @@ export function registerCalendarCommands(cli: ZeleCli) {
                   calendarId: cal.id,
                   timeMin,
                   timeMax,
-                  query: options.query,
-                  maxResults: max,
+                  query: options.filter,
+                  maxResults: limit,
                 })
                 if (r instanceof Error) return r
                 return r.events.map((e) => ({ ...e, calendarId: cal.id }))
@@ -145,8 +145,8 @@ export function registerCalendarCommands(cli: ZeleCli) {
               calendarId,
               timeMin,
               timeMax,
-              query: options.query,
-              maxResults: max,
+              query: options.filter,
+              maxResults: limit,
               pageToken: options.page,
             })
             if (r instanceof Error) return r
@@ -171,7 +171,7 @@ export function registerCalendarCommands(cli: ZeleCli) {
           result.events.map((e) => ({ ...e, account: email })),
         )
         .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
-        .slice(0, max)
+        .slice(0, limit)
 
       if (merged.length === 0) {
         out.printList([], { summary: 'No events found' })

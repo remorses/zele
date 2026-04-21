@@ -22,9 +22,9 @@ export function registerDraftCommands(cli: ZeleCli) {
 
   cli
     .command('draft list', 'List drafts')
-    .option('--max <max>', z.number().default(20).describe('Max results'))
+    .option('--limit <limit>', z.number().default(20).describe('Max results'))
     .option('--page <page>', z.string().describe('Pagination token (requires --account, only works for a single account)'))
-    .option('--query <query>', z.string().describe('Search query'))
+    .option('--filter <filter>', z.string().describe('Search query'))
     .action(async (options) => {
       const clients = await getClients(options.account)
 
@@ -37,8 +37,8 @@ export function registerDraftCommands(cli: ZeleCli) {
       const results = await Promise.all(
         clients.map(async ({ email, client }) => {
           const result = await client.listDrafts({
-            query: options.query,
-            maxResults: options.max,
+            query: options.filter,
+            maxResults: options.limit,
             pageToken: options.page,
           })
           if (result instanceof Error) return result
@@ -52,13 +52,13 @@ export function registerDraftCommands(cli: ZeleCli) {
           return true
         })
 
-      // Merge drafts from all accounts, sorted by date descending, capped at max
+      // Merge drafts from all accounts, sorted by date descending, capped at limit
       const merged = allResults
         .flatMap(({ email, result }) =>
           result.drafts.map((d) => ({ ...d, account: email })),
         )
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, options.max)
+        .slice(0, options.limit)
 
       if (merged.length === 0) {
         out.printList([], { summary: 'No drafts found' })

@@ -18,7 +18,7 @@ export function registerWatchCommands(cli: ZeleCli) {
     .command('mail watch', 'Watch for new emails (poll via History API)')
     .option('--interval [interval]', z.string().describe('Poll interval in seconds (default: 15)'))
     .option('--folder [folder]', z.string().describe('Folder to watch (default: inbox)'))
-    .option('--query [query]', z.string().describe('Filter messages client-side (from:, to:, cc:, subject:, is:unread, is:starred, has:attachment, -negate). See https://support.google.com/mail/answer/7190'))
+    .option('--filter [filter]', z.string().describe('Filter messages client-side (from:, to:, cc:, subject:, is:unread, is:starred, has:attachment, -negate). See https://support.google.com/mail/answer/7190'))
     .option('--once', z.boolean().describe('Print changes once and exit (no loop)'))
     .action(async (options) => {
       const interval = options.interval ? Number(options.interval) : 15
@@ -43,7 +43,7 @@ export function registerWatchCommands(cli: ZeleCli) {
         client.watchInbox({
           folder,
           intervalMs: interval * 1000,
-          query: options.query,
+          query: options.filter,
           once: options.once,
         }),
       )

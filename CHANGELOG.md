@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.21
+
+- **`--limit` everywhere** — replaces `--max` on `mail list`, `mail search`, `cal events`, and `draft list`. Controls how many results are fetched and shown (default: 20):
+
+  ```bash
+  zele mail list --limit 5
+  zele mail list --filter "is:unread" --limit 10
+  zele mail search "from:github" --limit 50
+  zele cal events --limit 5
+  zele draft list --limit 10
+  ```
+
+- **`--filter` everywhere** — replaces `--query` on `cal events`, `draft list`, and `mail watch`. Now consistent with `mail list`:
+
+  ```bash
+  zele cal events --filter "standup"
+  zele draft list --filter "invoice"
+  zele mail watch --filter "from:github"
+  ```
+
 ## 0.3.20
 
 1. **`--draft` flag on `mail reply` and `mail forward`** — save as draft instead of sending immediately:

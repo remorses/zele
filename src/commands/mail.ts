@@ -52,15 +52,15 @@ export function registerMailCommands(cli: ZeleCli) {
   cli
     .command('mail list', 'List email threads')
     .option('--folder [folder]', 'Folder to list (inbox, sent, trash, spam, starred, drafts, archive, all) (default: inbox)')
-    .option('--max [max]', 'Max results per page (default: 20)')
+    .option('--limit [limit]', 'Max threads to show (default: 20)')
     .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
     .option('--label <label>', 'Filter by label name')
     .option('--filter <filter>', 'Gmail search filter (e.g. "is:unread", "from:github", "has:attachment")')
     .action(async (options) => {
-      // `options.folder` / `options.max` are `string | undefined` now.
+      // `options.folder` / `options.limit` are `string | undefined` now.
       // `''` (bare flag) falls back to the default via `||`.
       const folder = options.folder || 'inbox'
-      const max = options.max ? Number(options.max) : 20
+      const limit = options.limit ? Number(options.limit) : 20
       const clients = await getClients(options.account)
 
       if (options.page && clients.length > 1) {
@@ -73,7 +73,7 @@ export function registerMailCommands(cli: ZeleCli) {
         clients.map(async ({ email, client, accountType }) => {
           const result = await client.listThreads({
             folder,
-            maxResults: max,
+            maxResults: limit,
             labelIds: options.label ? [options.label] : undefined,
             pageToken: options.page,
             query: options.filter,
@@ -102,13 +102,13 @@ export function registerMailCommands(cli: ZeleCli) {
       const labelMap = new Map<string, string>()
       for (const r of allResults) for (const [id, name] of r.labelMap) labelMap.set(id, name)
 
-      // Merge threads from all accounts, sorted by date descending, capped at max
+      // Merge threads from all accounts, sorted by date descending, capped at limit
       const merged = allResults
         .flatMap(({ email, result }) =>
           result.threads.map((t) => ({ ...t, account: email })),
         )
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, max)
+        .slice(0, limit)
 
       if (merged.length === 0) {
         out.printList([], { summary: 'No threads found' })
@@ -150,10 +150,10 @@ export function registerMailCommands(cli: ZeleCli) {
 
   cli
     .command('mail search <query>', 'Search email threads using Gmail query syntax (from:, to:, subject:, has:attachment, etc). See https://support.google.com/mail/answer/7190')
-    .option('--max [max]', 'Max results (default: 20)')
+    .option('--limit [limit]', 'Max results to show (default: 20)')
     .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
     .action(async (query, options) => {
-      const max = options.max ? Number(options.max) : 20
+      const limit = options.limit ? Number(options.limit) : 20
       const clients = await getClients(options.account)
 
       if (options.page && clients.length > 1) {
@@ -166,7 +166,7 @@ export function registerMailCommands(cli: ZeleCli) {
         clients.map(async ({ email, client, accountType }) => {
           const result = await client.listThreads({
             query,
-            maxResults: max,
+            maxResults: limit,
             pageToken: options.page,
           })
           if (result instanceof Error) return result
@@ -197,7 +197,7 @@ export function registerMailCommands(cli: ZeleCli) {
           result.threads.map((t) => ({ ...t, account: email })),
         )
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, max)
+        .slice(0, limit)
 
       if (merged.length === 0) {
         out.printList([], { summary: `No results for "${query}"` })
