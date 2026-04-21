@@ -11,16 +11,17 @@
 
 Multi-account email and calendar client supporting **Google OAuth** and **IMAP/SMTP** (Fastmail, Outlook, any provider). SQLite cache, YAML output.
 
-Requires [bun](https://bun.sh):
+All CLI commands work with **Node.js** (v18+). The interactive TUI (`zele` with no subcommand) requires [Bun](https://bun.sh) and will auto-spawn it if available.
 
 ```bash
-# install bun (skip if already installed)
-curl -fsSL https://bun.sh/install | bash   # macOS/Linux
-powershell -c "irm bun.sh/install.ps1|iex" # Windows
+# with npm / npx (CLI commands only, no TUI)
+npm install -g zele
 
-# install zele
+# with bun (full support including TUI)
 bun install -g zele
 ```
+
+> If you install via npm and run `zele` (the TUI), it will try to find `bun` in your PATH and re-spawn automatically. If bun is not installed, you'll get install instructions.
 
 ## Setup
 

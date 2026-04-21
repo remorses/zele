@@ -1,10 +1,15 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 // zele — Gmail CLI built on goke.
 // Entry point: registers all commands, global options, help, and version.
 // Uses goke for command parsing with zod schemas for type-safe options.
+//
+// Shebang is `node` so all CLI subcommands work without Bun.
+// Only the default TUI command requires Bun (OpenTUI Zig FFI). When
+// invoked under Node, the TUI re-spawns itself with `bun` via spawnSync.
 
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { goke } from 'goke'
 import { z } from 'zod'
 import React from 'react'
@@ -32,21 +37,36 @@ const cli: ZeleCli = goke('zele').option(
 // ---------------------------------------------------------------------------
 
 cli.command('', 'Browse emails in TUI').action(async () => {
-  if (typeof (globalThis as { Bun?: unknown }).Bun === 'undefined') {
-    const pc = await import('picocolors')
-    const isWindows = process.platform === 'win32'
-    const installCmd = isWindows
-      ? 'powershell -c "irm bun.sh/install.ps1 | iex"'
-      : 'curl -fsSL https://bun.sh/install | bash'
-    console.error(
-      pc.default.red('Error: ') +
-        'The TUI requires Bun to run.\n\n' +
-        'Install Bun:\n' +
-        `  ${pc.default.cyan(installCmd)}\n\n` +
-        'Then run:\n' +
-        `  ${pc.default.cyan('zele')}`,
-    )
-    process.exit(1)
+  // TODO: Remove bun re-spawn when opentui supports Node.js natively.
+  // OpenTUI's Zig renderer requires Bun FFI. When running under Node,
+  // re-spawn the same command with bun so the TUI works transparently.
+  const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined'
+  if (!isBun) {
+    const { spawnSync } = await import('node:child_process')
+    const __filename = fileURLToPath(import.meta.url)
+    const result = spawnSync('bun', [__filename, ...process.argv.slice(2)], {
+      stdio: 'inherit',
+      env: process.env,
+    })
+    if (result.error) {
+      // bun binary not found
+      const pc = await import('picocolors')
+      const isWindows = process.platform === 'win32'
+      const installCmd = isWindows
+        ? 'powershell -c "irm bun.sh/install.ps1 | iex"'
+        : 'curl -fsSL https://bun.sh/install | bash'
+      console.error(
+        pc.default.red('Error: ') +
+          'The TUI requires Bun to run.\n\n' +
+          'Install Bun:\n' +
+          `  ${pc.default.cyan(installCmd)}\n\n` +
+          'Then run:\n' +
+          `  ${pc.default.cyan('zele')}`,
+      )
+      process.exit(1)
+    }
+    process.exit(result.status ?? 1)
+    return
   }
 
   const accounts = await listAccounts()
