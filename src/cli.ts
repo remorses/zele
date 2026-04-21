@@ -65,6 +65,12 @@ cli.command('', 'Browse emails in TUI').action(async () => {
       )
       process.exit(1)
     }
+    // Preserve signal semantics: if the child was killed by a signal,
+    // re-raise it so the parent exits with the correct shell status.
+    if (result.signal) {
+      process.kill(process.pid, result.signal)
+      return
+    }
     process.exit(result.status ?? 1)
     return
   }
