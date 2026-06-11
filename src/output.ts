@@ -140,7 +140,6 @@ turndown.addRule('hidden-elements', {
 export function htmlToMarkdown(html: string): string {
   // Pre-clean: remove common email noise
   const cleaned = html
-    .replace(/<!\-\-[\s\S]*?\-\->/g, '') // HTML comments
     .replace(/<o:p>[\s\S]*?<\/o:p>/gi, '') // Outlook tags
     .replace(/<!\[if[\s\S]*?<!\[endif\]>/gi, '') // Outlook conditional comments
 
