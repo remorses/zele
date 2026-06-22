@@ -39,9 +39,9 @@ all persistent state is stored in this DB via Prisma models:
 
 prisma version in package.json MUST be pinned. no ^. this makes sure the generated prisma code is compatible with the prisma client used in the npm package
 
-## changelog
+## changesets
 
-keep `CHANGELOG.md` updated when making user-facing changes. bump the version in `package.json` and `src/cli.ts` together.
+After completing a fix or feature, add a `.changeset/*.md` file at the repo root instead of editing CHANGELOG.md. Never edit CHANGELOG.md directly; it is generated at publish time. Never bump `package.json` version manually. Load the `changesets` skill for format and rules.
 
 ## migrations
 
