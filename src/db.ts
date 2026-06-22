@@ -21,6 +21,30 @@ const DB_PATH = path.join(ZELE_DIR, 'sqlite.db')
 let prismaInstance: PrismaClient | null = null
 let initPromise: Promise<PrismaClient> | null = null
 
+function isBusyError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const msg = err.message
+  return msg.includes('SQLITE_BUSY') || msg.includes('database is locked')
+}
+
+async function retryOnBusy<T>(fn: () => Promise<T>): Promise<T> {
+  const maxRetries = 3
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      if (isBusyError(err) && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, attempt * 500))
+        continue
+      }
+      throw err
+    }
+  }
+  throw lastErr
+}
+
 /**
  * Get the singleton Prisma client instance.
  * Initializes the database on first call, running schema setup if needed.
@@ -49,18 +73,19 @@ async function initializePrisma(): Promise<PrismaClient> {
   const prisma = new PrismaClient({ adapter })
 
   // WAL mode: allows concurrent readers + single writer, persists on the DB file.
-  // busy_timeout: wait up to 5s for locks to clear instead of failing instantly.
+  // busy_timeout: wait up to 15s for locks to clear instead of failing instantly.
   // Prevents "database is locked" errors when multiple processes (TUI, watch, CLI)
   // access the DB, or after macOS sleep/wake leaves stale locks.
   await prisma.$executeRawUnsafe('PRAGMA journal_mode = WAL')
-  await prisma.$executeRawUnsafe('PRAGMA busy_timeout = 5000')
+  await prisma.$executeRawUnsafe('PRAGMA busy_timeout = 15000')
 
-  // Run schema.sql — uses CREATE TABLE IF NOT EXISTS so it's idempotent
-  await applySchema(prisma)
+  // Run schema.sql — uses CREATE TABLE IF NOT EXISTS so it's idempotent.
+  // Retry on transient SQLITE_BUSY from concurrent schema init.
+  await retryOnBusy(() => applySchema(prisma))
 
   // Add new columns to existing Account tables (idempotent migration).
   // CREATE TABLE IF NOT EXISTS doesn't add columns to pre-existing tables.
-  await migrateAccountColumns(prisma)
+  await retryOnBusy(() => migrateAccountColumns(prisma))
 
   // Secure database files (owner read/write only)
   secureDatabase()
