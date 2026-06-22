@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0
+
+1. **Run CLI under Node.js** — all CLI subcommands (`mail`, `cal`, `label`, etc.) now work with plain Node.js v18+. The TUI auto-spawns bun when running under Node; if bun isn't installed, it shows install instructions:
+
+   ```bash
+   # CLI-only (no bun needed)
+   npm install -g zele
+   zele mail list --limit 100
+
+   # Full TUI support
+   bun install -g zele
+   zele
+   ```
+
+2. **Fixed child signal propagation** — when the TUI is terminated by a signal (Ctrl+C, SIGTERM), the parent process now re-raises the signal so the shell sees the correct exit status (130 for SIGINT, 143 for SIGTERM) instead of a generic exit code 1.
+
+3. **Preserved HTML comments in email rendering** — HTML comments embedded in emails (like `<!-- metadata -->`) now pass through the HTML-to-markdown conversion instead of being stripped. Useful for programmatic consumers that embed metadata in outgoing emails.
+
+4. **Fixed @opentui/react version mismatch** — bumped `@opentui/core` and `@opentui/react` from `^0.1.88` to `^0.2.12` to match termcast's peer dependency range. Fresh installs were resolving an incompatible 0.1.x version, causing "Renderer not found" and React dispatcher crashes on TUI launch.
+
 ## 0.3.21
 
 1. **Polished interactive prompts** — replaced raw readline prompts with `@clack/prompts` across auth, draft, calendar, and label commands. All confirmation dialogs and selects now have a clean, styled UI.

@@ -1,6 +1,6 @@
 {
   "name": "zele",
-  "version": "0.3.21",
+  "version": "0.4.0",
   "description": "Email & Calendar CLI — Gmail, IMAP/SMTP, Google Calendar from your terminal",
   "type": "module",
   "main": "dist/cli.js",
@@ -27,8 +27,8 @@
     "@clack/prompts": "^1.2.0",
     "@googleapis/gmail": "^16.1.1",
     "@libsql/client": "^0.15.15",
-    "@opentui/core": "^0.1.88",
-    "@opentui/react": "^0.1.88",
+    "@opentui/core": "^0.2.12",
+    "@opentui/react": "^0.2.12",
     "@prisma/adapter-libsql": "7.3.0",
     "@prisma/client": "7.3.0",
     "@termcast/utils": "^2.2.8",
