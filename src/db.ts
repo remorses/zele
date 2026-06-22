@@ -2,11 +2,18 @@
 // Manages a single SQLite database at ~/.zele/sqlite.db for all state:
 // accounts (OAuth tokens), cache (threads, labels, profiles), and sync state.
 // Runs idempotent schema setup on every startup using src/schema.sql.
+//
+// Schema init uses a direct libsql transaction (BEGIN IMMEDIATE) so all DDL
+// runs under a single write-lock acquisition. This avoids the SQLITE_BUSY
+// contention that happens when multiple CLI processes each try to acquire the
+// write lock 13+ times (once per CREATE TABLE/INDEX statement). The busy_timeout
+// PRAGMA (15s) handles the wait if another process holds the lock.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { createClient } from '@libsql/client'
 import { PrismaLibSql } from '@prisma/adapter-libsql'
 import { PrismaClient } from './generated/client.js'
 
@@ -20,30 +27,6 @@ const DB_PATH = path.join(ZELE_DIR, 'sqlite.db')
 
 let prismaInstance: PrismaClient | null = null
 let initPromise: Promise<PrismaClient> | null = null
-
-function isBusyError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false
-  const msg = err.message
-  return msg.includes('SQLITE_BUSY') || msg.includes('database is locked')
-}
-
-async function retryOnBusy<T>(fn: () => Promise<T>): Promise<T> {
-  const maxRetries = 3
-  let lastErr: unknown
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn()
-    } catch (err) {
-      lastErr = err
-      if (isBusyError(err) && attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, attempt * 500))
-        continue
-      }
-      throw err
-    }
-  }
-  throw lastErr
-}
 
 /**
  * Get the singleton Prisma client instance.
@@ -69,6 +52,11 @@ async function initializePrisma(): Promise<PrismaClient> {
     fs.chmodSync(ZELE_DIR, 0o700)
   }
 
+  // Run schema + migrations atomically via direct libsql client.
+  // Uses a single BEGIN IMMEDIATE transaction so only one write-lock
+  // acquisition is needed instead of one per DDL statement.
+  await applySchemaAndMigrate()
+
   const adapter = new PrismaLibSql({ url: `file:${DB_PATH}` })
   const prisma = new PrismaClient({ adapter })
 
@@ -79,14 +67,6 @@ async function initializePrisma(): Promise<PrismaClient> {
   await prisma.$executeRawUnsafe('PRAGMA journal_mode = WAL')
   await prisma.$executeRawUnsafe('PRAGMA busy_timeout = 15000')
 
-  // Run schema.sql — uses CREATE TABLE IF NOT EXISTS so it's idempotent.
-  // Retry on transient SQLITE_BUSY from concurrent schema init.
-  await retryOnBusy(() => applySchema(prisma))
-
-  // Add new columns to existing Account tables (idempotent migration).
-  // CREATE TABLE IF NOT EXISTS doesn't add columns to pre-existing tables.
-  await retryOnBusy(() => migrateAccountColumns(prisma))
-
   // Secure database files (owner read/write only)
   secureDatabase()
 
@@ -94,7 +74,17 @@ async function initializePrisma(): Promise<PrismaClient> {
   return prisma
 }
 
-async function applySchema(prisma: PrismaClient): Promise<void> {
+/**
+ * Run schema.sql DDL and column migrations inside a single BEGIN IMMEDIATE
+ * transaction via the libsql client directly (bypassing Prisma).
+ *
+ * This acquires the SQLite write lock once for the entire init sequence
+ * instead of once per statement, eliminating SQLITE_BUSY contention when
+ * multiple CLI processes start concurrently.
+ *
+ * The libsql client is closed after init; Prisma handles all runtime queries.
+ */
+async function applySchemaAndMigrate(): Promise<void> {
   // When running from source (tsx), __dirname is src/
   // When running from dist, __dirname is dist/ and schema.sql is at ../src/schema.sql
   let schemaPath = path.join(__dirname, 'schema.sql')
@@ -117,33 +107,48 @@ async function applySchema(prisma: PrismaClient): Promise<void> {
     .map((s) => s.replace(/^CREATE\s+UNIQUE\s+INDEX\b(?!\s+IF)/i, 'CREATE UNIQUE INDEX IF NOT EXISTS')
                  .replace(/^CREATE\s+INDEX\b(?!\s+IF)/i, 'CREATE INDEX IF NOT EXISTS'))
 
-  for (const statement of statements) {
-    await prisma.$executeRawUnsafe(statement)
-  }
-}
+  const libsql = createClient({ url: `file:${DB_PATH}` })
+  try {
+    // Set busy_timeout on the init connection too, so BEGIN IMMEDIATE
+    // waits up to 15s if another process holds the lock.
+    await libsql.execute('PRAGMA busy_timeout = 15000')
+    await libsql.execute('PRAGMA journal_mode = WAL')
 
-/**
- * Idempotent migration: add accountType and capabilities columns to Account
- * if they don't already exist (for DBs created before IMAP/SMTP support).
- * Also backfill existing Google accounts with their default capabilities.
- */
-async function migrateAccountColumns(prisma: PrismaClient): Promise<void> {
-  const cols = await prisma.$queryRawUnsafe<Array<{ name: string }>>(`PRAGMA table_info("Account")`)
-  const colNames = new Set(cols.map((c) => c.name))
+    // "write" mode = BEGIN IMMEDIATE: acquires the write lock upfront.
+    // All DDL + migration runs atomically; auto-rollback on any failure.
+    const tx = await libsql.transaction('write')
+    try {
+      // Schema DDL
+      for (const statement of statements) {
+        await tx.execute(statement)
+      }
 
-  if (!colNames.has('accountType')) {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "Account" ADD COLUMN "accountType" TEXT NOT NULL DEFAULT 'google'`)
-  }
-  if (!colNames.has('capabilities')) {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "Account" ADD COLUMN "capabilities" TEXT NOT NULL DEFAULT ''`)
-  }
+      // Column migrations (idempotent: ADD COLUMN for pre-IMAP/SMTP DBs).
+      // SQLite errors on duplicate columns, so check first.
+      const cols = await tx.execute(`PRAGMA table_info("Account")`)
+      const colNames = new Set(cols.rows.map((r) => String(r[1])))
 
-  // Backfill: existing Google accounts should have capabilities set
-  await prisma.$executeRawUnsafe(`
-    UPDATE "Account"
-    SET "capabilities" = 'gmail,calendar,smtp'
-    WHERE "accountType" = 'google' AND ("capabilities" = '' OR "capabilities" IS NULL)
-  `)
+      if (!colNames.has('accountType')) {
+        await tx.execute(`ALTER TABLE "Account" ADD COLUMN "accountType" TEXT NOT NULL DEFAULT 'google'`)
+      }
+      if (!colNames.has('capabilities')) {
+        await tx.execute(`ALTER TABLE "Account" ADD COLUMN "capabilities" TEXT NOT NULL DEFAULT ''`)
+      }
+
+      // Backfill: existing Google accounts should have capabilities set
+      await tx.execute(`
+        UPDATE "Account"
+        SET "capabilities" = 'gmail,calendar,smtp'
+        WHERE "accountType" = 'google' AND ("capabilities" = '' OR "capabilities" IS NULL)
+      `)
+
+      await tx.commit()
+    } finally {
+      tx.close()
+    }
+  } finally {
+    libsql.close()
+  }
 }
 
 /**
