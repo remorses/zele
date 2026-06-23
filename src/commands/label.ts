@@ -5,6 +5,7 @@
 
 import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
+import { isAgent } from 'goke'
 import * as clack from '@clack/prompts'
 import { getClients, getGmailClient } from '../auth.js'
 import { AuthError, UnsupportedError } from '../api-utils.js'
@@ -122,7 +123,12 @@ export function registerLabelCommands(cli: ZeleCli) {
     .command('label delete <labelId>', 'Delete a label')
     .option('--force', 'Skip confirmation')
     .action(async (labelId, options) => {
-      if (!options.force && process.stdin.isTTY) {
+      if (!options.force) {
+        if (isAgent || !process.stdin.isTTY) {
+          out.error('Use --force to delete non-interactively')
+          process.exit(1)
+        }
+
         const confirmed = await clack.confirm({
           message: `Delete label ${labelId}?`,
           initialValue: false,

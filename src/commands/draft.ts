@@ -13,7 +13,7 @@ import type { ImapSmtpClient } from '../imap-smtp-client.js'
 import { AuthError } from '../api-utils.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
-import pc from 'picocolors'
+import { colors as pc, isAgent } from 'goke'
 
 export function registerDraftCommands(cli: ZeleCli) {
   // =========================================================================
@@ -240,7 +240,12 @@ export function registerDraftCommands(cli: ZeleCli) {
     .command('draft delete <draftId>', 'Delete a draft')
     .option('--force', 'Skip confirmation')
     .action(async (draftId, options) => {
-      if (!options.force && process.stdin.isTTY) {
+      if (!options.force) {
+        if (isAgent || !process.stdin.isTTY) {
+          out.error('Use --force to delete non-interactively')
+          process.exit(1)
+        }
+
         const confirmed = await clack.confirm({
           message: `Delete draft ${draftId}?`,
           initialValue: false,

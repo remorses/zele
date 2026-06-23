@@ -28,8 +28,8 @@ import { registerFilterCommands } from './commands/filter.js'
 import { handleCommandError } from './output.js'
 
 const cli: ZeleCli = goke('zele').option(
-  '--account <account>',
-  z.array(z.string()).describe('Filter by email account (repeatable)'),
+  '--account [account]',
+  z.array(z.string()).optional().describe('Filter by email account (repeatable)'),
 )
 
 // ---------------------------------------------------------------------------
@@ -50,18 +50,18 @@ cli.command('', 'Browse emails in TUI').action(async () => {
     })
     if (result.error) {
       // bun binary not found
-      const pc = await import('picocolors')
+      const { colors } = await import('goke')
       const isWindows = process.platform === 'win32'
       const installCmd = isWindows
         ? 'powershell -c "irm bun.sh/install.ps1 | iex"'
         : 'curl -fsSL https://bun.sh/install | bash'
       console.error(
-        pc.default.red('Error: ') +
+        colors.red('Error: ') +
           'The TUI requires Bun to run.\n\n' +
           'Install Bun:\n' +
-          `  ${pc.default.cyan(installCmd)}\n\n` +
+          `  ${colors.cyan(installCmd)}\n\n` +
           'Then run:\n' +
-          `  ${pc.default.cyan('zele')}`,
+          `  ${colors.cyan('zele')}`,
       )
       process.exit(1)
     }
@@ -109,6 +109,7 @@ registerFilterCommands(cli)
 // ---------------------------------------------------------------------------
 
 cli.help()
+cli.completions()
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json')
 cli.version(version)
@@ -117,4 +118,4 @@ cli.version(version)
 // Parse & run
 // ---------------------------------------------------------------------------
 
-cli.parse()
+void cli.parse()

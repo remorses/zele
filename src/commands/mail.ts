@@ -16,7 +16,7 @@ import { AuthError } from '../api-utils.js'
 import { hasUnsubscribeMechanism, hasOneClickUnsubscribe } from '../unsubscribe.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
-import pc from 'picocolors'
+import { colors as pc } from 'goke'
 
 // ---------------------------------------------------------------------------
 // Label formatting — filter out system labels already represented by flags

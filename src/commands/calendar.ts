@@ -5,6 +5,7 @@
 
 import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
+import { isAgent } from 'goke'
 import * as clack from '@clack/prompts'
 import { getCalendarClients, getCalendarClient } from '../auth.js'
 import type { CalendarClient, CalendarEvent, CalendarListItem, EventListResult } from '../calendar-client.js'
@@ -417,7 +418,12 @@ export function registerCalendarCommands(cli: ZeleCli) {
       const calendarId = options.calendar ?? 'primary'
       const { client } = await getCalendarClient(options.account)
 
-      if (!options.force && process.stdin.isTTY) {
+      if (!options.force) {
+        if (isAgent || !process.stdin.isTTY) {
+          out.error('Use --force to delete non-interactively')
+          process.exit(1)
+        }
+
         const confirmed = await clack.confirm({
           message: `Delete event ${eventId}?`,
           initialValue: false,
@@ -443,18 +449,30 @@ export function registerCalendarCommands(cli: ZeleCli) {
   cli
     .command('cal respond <eventId>', 'Respond to event invitation')
     .option('--calendar <calendar>', 'Calendar ID (default: primary)')
-    .option('--status <status>', z.string().describe('Response: accepted, declined, tentative'))
+    .option('--status [status]', z.enum(['accepted', 'declined', 'tentative']).optional().describe('Response: accepted, declined, tentative'))
     .option('--comment <comment>', 'Optional comment')
     .action(async (eventId, options) => {
-      if (!options.status) {
-        out.error('--status is required (accepted, declined, tentative)')
-        process.exit(1)
-      }
+      let status = options.status
 
-      const validStatuses = ['accepted', 'declined', 'tentative']
-      if (!validStatuses.includes(options.status)) {
-        out.error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`)
-        process.exit(1)
+      if (!status) {
+        if (isAgent || !process.stdin.isTTY) {
+          out.error('Missing --status. Usage: zele cal respond <eventId> --status accepted|declined|tentative')
+          process.exit(1)
+        }
+
+        const choice = await clack.select({
+          message: 'How do you want to respond?',
+          options: [
+            { value: 'accepted' as const, label: 'Accept' },
+            { value: 'declined' as const, label: 'Decline' },
+            { value: 'tentative' as const, label: 'Maybe' },
+          ],
+        })
+        if (clack.isCancel(choice)) {
+          out.hint('Cancelled')
+          return
+        }
+        status = choice
       }
 
       const calendarId = options.calendar ?? 'primary'
@@ -463,7 +481,7 @@ export function registerCalendarCommands(cli: ZeleCli) {
       const respondResult = await client.respondToEvent({
         calendarId,
         eventId,
-        status: options.status as 'accepted' | 'declined' | 'tentative',
+        status,
         comment: options.comment,
       })
       if (respondResult instanceof Error) handleCommandError(respondResult)
@@ -471,10 +489,10 @@ export function registerCalendarCommands(cli: ZeleCli) {
       out.printYaml({
         id: respondResult.id,
         summary: respondResult.summary,
-        status: options.status,
+        status,
         ...(options.comment ? { comment: options.comment } : {}),
       })
-      out.success(`Responded: ${options.status}`)
+      out.success(`Responded: ${status}`)
     })
 
   // =========================================================================

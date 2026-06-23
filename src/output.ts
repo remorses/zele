@@ -12,7 +12,7 @@
 import yaml from 'js-yaml'
 import TurndownService from 'turndown'
 import { remark } from 'remark'
-import pc from 'picocolors'
+import { colors as pc } from 'goke'
 import EmailReplyParser from 'email-reply-parser'
 
 // ---------------------------------------------------------------------------
