@@ -183,3 +183,13 @@ export function isRateLimitError(err: any): boolean {
   }
   return false
 }
+
+/** Sleep that resolves immediately when an AbortSignal fires.
+ *  Used by watchInbox to make the poll interval interruptible. */
+export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve()
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+  })
+}

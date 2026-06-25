@@ -109,7 +109,16 @@ zele mail read <thread-id>                        # read a thread
 zele mail send                                    # send an email
 zele mail reply <thread-id>                       # reply to a thread
 zele mail forward <thread-id>                     # forward a thread
-zele mail watch                                   # watch for new emails (poll)
+zele mail watch                                   # wait for the next new email
+zele mail watch --filter "is:unread from:alice"   # wait for a specific email
+zele mail watch --timeout 300                     # wait up to 5 minutes
+```
+
+`mail watch` blocks until the first email matching the filter arrives, prints it, and exits (code 0). If `--timeout` is set and no match arrives in time, it exits with code 1. This is useful for agents that need to send an email and then wait for the reply:
+
+```bash
+zele mail send --to bob@example.com --subject "Question" --body "Hey, can you check this?"
+zele mail watch --filter "is:unread from:bob subject:Re:Question" --timeout 600
 ```
 
 ### Mail actions
@@ -178,7 +187,7 @@ For **Google accounts**, `mail search` and `mail list --filter` use [Gmail searc
 zele mail list --filter "is:unread" --limit 100
 zele mail list --filter "from:github newer_than:7d" --folder sent --limit 100
 zele mail search "from:github is:unread newer_than:7d" --limit 100
-zele mail watch --filter "from:github has:attachment"
+zele mail watch --filter "from:github has:attachment" --timeout 300
 ```
 
 ### Drafts

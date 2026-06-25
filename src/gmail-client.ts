@@ -13,7 +13,7 @@ import type { OAuth2Client } from 'google-auth-library'
 import { createMimeMessage } from 'mimetext'
 import { parseFrom, parseAddressList } from './email-utils.js'
 import * as errore from 'errore'
-import { withRetry, mapConcurrent, AuthError, isAuthLikeError, ApiError, NotFoundError, EmptyThreadError, MissingDataError } from './api-utils.js'
+import { withRetry, mapConcurrent, AuthError, isAuthLikeError, ApiError, NotFoundError, EmptyThreadError, MissingDataError, abortableSleep } from './api-utils.js'
 import { renderEmailBody } from './output.js'
 import { getPrisma } from './db.js'
 import type { AccountId } from './auth.js'
@@ -1837,12 +1837,12 @@ export class GmailClient {
     folder = 'inbox',
     intervalMs = 15_000,
     query,
-    once = false,
+    signal,
   }: {
     folder?: string
     intervalMs?: number
     query?: string
-    once?: boolean
+    signal?: AbortSignal
   } = {}): AsyncGenerator<WatchEvent> {
     if (!this.account) throw new MissingDataError({ what: 'authenticated account', resource: 'watchInbox' })
 
@@ -1860,7 +1860,7 @@ export class GmailClient {
       await setLastHistoryId(this.account, historyId)
     }
 
-    while (true) {
+    while (!signal?.aborted) {
       // listHistory returns errors as values — check and handle history expiry.
       const historyResult = await this.listHistory({
         startHistoryId: historyId,
@@ -1883,8 +1883,7 @@ export class GmailClient {
         yield* this.pollOnceFromHistory(historyResult, historyId, query, (newId) => { historyId = newId })
       }
 
-      if (once) return
-      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+      await abortableSleep(intervalMs, signal)
     }
   }
 

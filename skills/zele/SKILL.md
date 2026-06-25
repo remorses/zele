@@ -47,3 +47,16 @@ The README and `zele --help` output are the source of truth for commands, option
    ```
 5. **Google-only features** (labels, Gmail filters, `zele cal *`, full profile) fail on IMAP accounts with a clear error. Check `zele whoami` output for account type before using them.
 6. **Headless Google login** requires a tmux wrapper because `zele login` is interactive. See the README "Remote / headless login" section for the exact pattern.
+7. **Waiting for emails** with `zele mail watch`. It polls for new emails matching a filter and exits as soon as one arrives. Use this to wait for replies, verification codes, or any expected email:
+   ```bash
+   # wait for a reply from alice (no timeout, blocks until match)
+   zele mail watch --filter "is:unread from:alice@example.com"
+
+   # wait for a verification code with a 5-minute timeout
+   zele mail watch --filter "is:unread subject:verification" --timeout 300
+
+   # send an email then wait for the reply
+   zele mail send --to bob@example.com --subject "Question" --body "Hey, can you check this?"
+   zele mail watch --filter "is:unread from:bob@example.com subject:Re:Question" --timeout 600
+   ```
+   If the matched email wasn't the expected one, call `zele mail watch` again with a more specific filter. Exit code 0 means a match was found, exit code 1 means timeout.

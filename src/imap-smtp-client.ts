@@ -10,7 +10,7 @@ import { ImapFlow, type FetchMessageObject, type MessageEnvelopeObject, type Mai
 import type { Transporter } from 'nodemailer'
 import { createMimeMessage } from 'mimetext'
 import * as errore from 'errore'
-import { AuthError, ApiError, UnsupportedError, EmptyThreadError, NotFoundError, mapConcurrent, withRetry } from './api-utils.js'
+import { AuthError, ApiError, UnsupportedError, EmptyThreadError, NotFoundError, mapConcurrent, withRetry, abortableSleep } from './api-utils.js'
 import { renderEmailBody } from './output.js'
 import type { AccountId, ImapSmtpCredentials, ImapCredentials, SmtpCredentials } from './auth.js'
 import type {
@@ -903,12 +903,12 @@ export class ImapSmtpClient {
     folder = 'inbox',
     intervalMs = 15_000,
     query,
-    once = false,
+    signal,
   }: {
     folder?: string
     intervalMs?: number
     query?: string
-    once?: boolean
+    signal?: AbortSignal
   } = {}): AsyncGenerator<WatchEvent> {
     // Resolve folder path once (use a fresh connection)
     let imapFolder = 'INBOX'
@@ -934,7 +934,7 @@ export class ImapSmtpClient {
     if (seedResult instanceof Error) throw seedResult
     lastUid = seedResult as number
 
-    while (true) {
+    while (!signal?.aborted) {
       // Check for new messages since lastUid
       const pollResult = await this.withImap(async (client) => {
         const lock = await client.getMailboxLock(imapFolder)
@@ -976,8 +976,7 @@ export class ImapSmtpClient {
         yield event
       }
 
-      if (once) return
-      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+      await abortableSleep(intervalMs, signal)
     }
   }
 
