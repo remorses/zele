@@ -108,6 +108,7 @@ zele mail search "from:github" --limit 100        # search with Gmail query synt
 zele mail read <thread-id>                        # read a thread
 zele mail send                                    # send an email
 zele mail reply <thread-id>                       # reply to a thread
+zele mail reply <thread-id> --attach report.xlsx  # reply with an attachment
 zele mail forward <thread-id>                     # forward a thread
 zele mail watch                                   # watch for new emails (poll)
 ```
