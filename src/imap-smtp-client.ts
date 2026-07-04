@@ -598,12 +598,14 @@ export class ImapSmtpClient {
     body,
     replyAll = false,
     cc,
+    attachments,
     fromEmail,
   }: {
     threadId: string
     body: string
     replyAll?: boolean
     cc?: Array<{ email: string }>
+    attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
     fromEmail?: string
   }): Promise<EmptyThreadError | UnsupportedError | AuthError | ApiError | { id: string; threadId: string; labelIds: string[] }> {
     const thread = await this.getThread({ threadId })
@@ -643,6 +645,7 @@ export class ImapSmtpClient {
       cc: resolvedCc,
       inReplyTo: lastMsg.messageId,
       references: refs || undefined,
+      attachments,
     })
   }
 
@@ -1168,12 +1171,14 @@ export class ImapSmtpClient {
     body,
     replyAll = false,
     cc,
+    attachments,
     fromEmail,
   }: {
     threadId: string
     body: string
     replyAll?: boolean
     cc?: Array<{ email: string }>
+    attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
     fromEmail?: string
   }): Promise<EmptyThreadError | AuthError | ApiError | { id: string; message: { id: string }; threadId: string }> {
     const thread = await this.getThread({ threadId })
@@ -1207,27 +1212,31 @@ export class ImapSmtpClient {
     const refs = [lastMsg.references, lastMsg.messageId].filter(Boolean).join(' ')
     const subject = lastMsg.subject.startsWith('Re:') ? lastMsg.subject : `Re: ${lastMsg.subject}`
 
-    // Build MIME with reply headers
-    const headers = [
-      `From: ${fromEmail ?? this.account.email}`,
-      `To: ${to.map((r) => r.email).join(', ')}`,
-      `Subject: ${subject}`,
-      `Date: ${new Date().toUTCString()}`,
-      `MIME-Version: 1.0`,
-      `Content-Type: text/plain; charset=utf-8`,
-    ]
+    const msg = createMimeMessage()
+    msg.setSender(fromEmail ?? this.account.email)
+    msg.setRecipients(to.map((r) => ({ name: '', addr: r.email })))
+    msg.setSubject(subject)
     if (resolvedCc && resolvedCc.length > 0) {
-      headers.push(`Cc: ${resolvedCc.map((r) => r.email).join(', ')}`)
+      msg.setCc(resolvedCc.map((r) => ({ name: '', addr: r.email })))
     }
+    msg.addMessage({ contentType: 'text/plain', data: body })
     if (lastMsg.messageId) {
-      headers.push(`In-Reply-To: ${lastMsg.messageId}`)
+      msg.setHeader('In-Reply-To', lastMsg.messageId)
     }
     if (refs) {
-      headers.push(`References: ${refs}`)
+      msg.setHeader('References', refs)
+    }
+    if (attachments) {
+      for (const attachment of attachments) {
+        msg.addAttachment({
+          filename: attachment.filename,
+          contentType: attachment.mimeType,
+          data: attachment.content.toString('base64'),
+        })
+      }
     }
 
-    const raw = headers.join('\r\n') + '\r\n\r\n' + body
-    const rawBuffer = Buffer.from(raw)
+    const rawBuffer = Buffer.from(msg.asRaw())
 
     const result = await this.withImap(async (client) => {
       const draftsPath = await this.resolveMailboxPath(client, 'drafts')

@@ -3,11 +3,66 @@
 
 import { expect, test, describe } from 'vitest'
 import { OAuth2Client } from 'google-auth-library'
-import { GmailClient, parseAuthResults } from './gmail-client.js'
+import { GmailClient, parseAuthResults, type ParsedMessage, type ThreadResult } from './gmail-client.js'
 
 // Create a real client instance for testing (no account context needed for parsing tests)
 const auth = new OAuth2Client()
 const client = new GmailClient({ auth })
+
+type SendMessageInput = Parameters<GmailClient['sendMessage']>[0]
+
+const replySourceMessage: ParsedMessage = {
+  id: 'msg_1',
+  threadId: 'thread_1',
+  subject: 'Question',
+  snippet: 'Can you check this?',
+  from: { email: 'sender@example.com' },
+  to: [{ email: 'me@example.com' }],
+  cc: null,
+  bcc: [],
+  replyTo: 'reply-to@example.com',
+  date: 'Tue, 10 Feb 2026 12:00:00 +0000',
+  labelIds: ['INBOX'],
+  unread: false,
+  starred: false,
+  isDraft: false,
+  messageId: '<msg_1@example.com>',
+  references: '<root@example.com>',
+  body: 'Can you check this?',
+  mimeType: 'text/plain',
+  textBody: 'Can you check this?',
+  attachments: [],
+  auth: null,
+}
+
+class ReplyAttachmentClient extends GmailClient {
+  sentMessage: SendMessageInput | null = null
+
+  async getThread(): Promise<ThreadResult> {
+    return {
+      parsed: {
+        id: 'thread_1',
+        historyId: null,
+        messages: [replySourceMessage],
+        subject: replySourceMessage.subject,
+        snippet: replySourceMessage.snippet,
+        from: replySourceMessage.from,
+        date: replySourceMessage.date,
+        labelIds: replySourceMessage.labelIds,
+        hasUnread: false,
+        messageCount: 1,
+      },
+      raw: { id: 'thread_1' },
+    }
+  }
+
+  async sendMessage(params: SendMessageInput) {
+    this.sentMessage = params
+    return { id: 'sent_1', threadId: params.threadId, labelIds: ['SENT'] }
+  }
+
+  async invalidateThread() {}
+}
 
 test('thread list snippet decodes HTML entities for TUI preview', () => {
   const rawThread = {
@@ -61,6 +116,31 @@ test('thread list snippet strips zero-width and preheader garbage', () => {
 
   const parsed = client.parseThreadListItem(rawThread as any)
   expect(parsed.snippet).toBe('A host sent you a message')
+})
+
+test('replyToThread passes attachments into the threaded send', async () => {
+  const client = new ReplyAttachmentClient({ auth })
+  const attachment = {
+    filename: 'report.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    content: Buffer.from('workbook'),
+  }
+
+  await client.replyToThread({
+    threadId: 'thread_1',
+    body: 'Attached.',
+    attachments: [attachment],
+  })
+
+  expect(client.sentMessage).toMatchObject({
+    to: [{ email: 'reply-to@example.com' }],
+    subject: 'Re: Question',
+    body: 'Attached.',
+    threadId: 'thread_1',
+    inReplyTo: '<msg_1@example.com>',
+    references: '<root@example.com> <msg_1@example.com>',
+    attachments: [attachment],
+  })
 })
 
 // ---------------------------------------------------------------------------

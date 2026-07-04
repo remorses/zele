@@ -35,6 +35,24 @@ function formatLabels(labelIds: string[], labelMap?: Map<string, string>): strin
   return visible.join(', ')
 }
 
+function resolveAttachments(filePaths?: string[]) {
+  return filePaths
+    ? filePaths.map((filePath) => {
+        const resolved = path.resolve(filePath)
+        if (!fs.existsSync(resolved)) {
+          out.error(`Attachment not found: ${resolved}`)
+          process.exit(1)
+        }
+
+        return {
+          filename: path.basename(resolved),
+          mimeType: mimeLookup(resolved) ?? 'application/octet-stream',
+          content: fs.readFileSync(resolved),
+        }
+      })
+    : undefined
+}
+
 // ---------------------------------------------------------------------------
 // Register commands
 // ---------------------------------------------------------------------------
@@ -424,21 +442,7 @@ export function registerMailCommands(cli: ZeleCli) {
         process.exit(1)
       }
 
-      // Resolve attachment file paths (one file per --attach flag)
-      const attachments = options.attach
-        ? options.attach.map((filePath) => {
-            const resolved = path.resolve(filePath)
-            if (!fs.existsSync(resolved)) {
-              out.error(`Attachment not found: ${resolved}`)
-              process.exit(1)
-            }
-            return {
-              filename: path.basename(resolved),
-              mimeType: mimeLookup(resolved) ?? 'application/octet-stream',
-              content: fs.readFileSync(resolved),
-            }
-          })
-        : undefined
+      const attachments = resolveAttachments(options.attach)
 
       const parseEmails = (str: string) =>
         str.split(',').map((e) => e.trim()).filter(Boolean).map((email) => ({ email }))
@@ -471,6 +475,7 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--cc <cc>', z.string().describe('Additional CC recipients'))
     .option('--all', 'Reply all (include all original recipients)')
     .option('--from <from>', z.string().describe('Send-as alias email'))
+    .option('--attach <attach>', z.array(z.string()).describe('File to attach (repeatable: --attach a.pdf --attach b.png)'))
     .option('--draft', 'Save as draft instead of sending')
     .action(async (threadId, options) => {
       let body = options.body ?? ''
@@ -497,6 +502,8 @@ export function registerMailCommands(cli: ZeleCli) {
         ? options.cc.split(',').map((e: string) => ({ email: e.trim() })).filter((e: { email: string }) => e.email)
         : undefined
 
+      const attachments = resolveAttachments(options.attach)
+
       if (options.draft) {
         const result = await client.createDraftReply({
           threadId,
@@ -504,6 +511,7 @@ export function registerMailCommands(cli: ZeleCli) {
           replyAll: options.all,
           cc,
           fromEmail: options.from,
+          attachments,
         })
         if (result instanceof Error) handleCommandError(result)
 
@@ -518,6 +526,7 @@ export function registerMailCommands(cli: ZeleCli) {
         replyAll: options.all,
         cc,
         fromEmail: options.from,
+        attachments,
       })
       if (result instanceof Error) handleCommandError(result)
 

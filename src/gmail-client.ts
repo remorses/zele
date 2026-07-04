@@ -575,12 +575,14 @@ export class GmailClient {
     body,
     replyAll = false,
     cc,
+    attachments,
     fromEmail,
   }: {
     threadId: string
     body: string
     replyAll?: boolean
     cc?: Array<{ email: string }>
+    attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
     fromEmail?: string
   }): Promise<EmptyThreadError | AuthError | ApiError | gmail_v1.Schema$Message> {
     const { parsed: thread } = await this.getThread({ threadId })
@@ -625,6 +627,7 @@ export class GmailClient {
       threadId,
       inReplyTo: lastMsg.messageId,
       references: refs || undefined,
+      attachments,
       fromEmail,
     })
 
@@ -870,12 +873,14 @@ export class GmailClient {
     body,
     replyAll = false,
     cc,
+    attachments,
     fromEmail,
   }: {
     threadId: string
     body: string
     replyAll?: boolean
     cc?: Array<{ email: string }>
+    attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
     fromEmail?: string
   }): Promise<EmptyThreadError | AuthError | ApiError | gmail_v1.Schema$Draft> {
     const { parsed: thread } = await this.getThread({ threadId })
@@ -919,6 +924,7 @@ export class GmailClient {
       cc: resolvedCc,
       inReplyTo: lastMsg.messageId,
       references: refs || undefined,
+      attachments,
       fromEmail,
     })
 
