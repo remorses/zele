@@ -1,7 +1,7 @@
 // Tests for GmailClient parsing behavior used by TUI previews.
 // Captures entity/encoding regressions in snippet fields from Gmail metadata responses.
 
-import { expect, test, describe } from 'vitest'
+import { expect, test, describe, vi, afterEach } from 'vitest'
 import { OAuth2Client } from 'googleapis-common'
 import {
   buildGmailMimeMessage,
@@ -424,5 +424,116 @@ describe('threadMatchesListQuery', () => {
 
   test('OR queries are not AND-filtered client-side', () => {
     expect(threadMatchesListQuery(readSent, 'is:unread OR is:starred')).toBe(true)
+  })
+})
+
+
+function decodeDraftMime(raw: string) {
+  return decodeGmailRaw(raw).replace(
+    /(Content-Type: text\/html[^]*?Content-Transfer-Encoding: base64\r?\n\r?\n)([A-Za-z0-9+/=\r\n]+)/g,
+    (_, headers, body) => headers + Buffer.from(body, 'base64').toString('utf8'),
+  )
+}
+
+describe('Gmail draft natural wrapping', () => {
+  afterEach(() => vi.restoreAllMocks())
+  const to = [{ email: 'recipient@example.test' }]
+  const paragraph = 'Tamással a TODO for AI-t építjük. ' + 'This paragraph must wrap naturally. '.repeat(15)
+  const body = `Hi,\n\n${paragraph}\n\nBest,\nMarcell`
+
+  test('draft plain text becomes escaped HTML without fixed-width breaks', () => {
+    const mime = decodeDraftMime(buildGmailMimeMessage({ to, subject: 'Draft', body, draft: true }))
+    expect(mime).toContain('Content-Type: text/html')
+    expect(mime).toContain(`<div style="white-space:pre-wrap">Hi,<br><br>${paragraph}<br><br>Best,<br>Marcell</div>`)
+    expect(mime).not.toContain('text/plain')
+  })
+
+  test('escapes text, normalizes line endings, and preserves intentional blank lines', () => {
+    const text = 'A & B < 10 > 2\r\n\r\nline two\rline three\n'
+    const mime = decodeDraftMime(buildGmailMimeMessage({ to, subject: 'Draft', body: text, draft: true }))
+    expect(mime).toContain('<div style="white-space:pre-wrap">A &amp; B &lt; 10 &gt; 2<br><br>line two<br>line three<br></div>')
+  })
+
+  test.each(['Bob <bob@example.test>', 'Vec<String>', 'use <custom-element> literally'])('escapes plain angle brackets: %s', (body) => {
+    const mime = decodeDraftMime(buildGmailMimeMessage({ to, subject: 'Draft', body, draft: true }))
+    expect(mime).toContain(body.replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+  })
+
+  test('preserves indentation and spaces with naturally wrapping CSS', () => {
+    const mime = decodeDraftMime(buildGmailMimeMessage({ to, subject: 'Draft', body: '  indented  text', draft: true }))
+    expect(mime).toContain('<div style="white-space:pre-wrap">  indented  text</div>')
+  })
+
+  test('draft transport uses base64 for Unicode and bounded MIME lines', () => {
+    const raw = decodeGmailRaw(buildGmailMimeMessage({ to, subject: 'Draft', body: paragraph.repeat(20), draft: true }))
+    expect(raw).toContain('Content-Transfer-Encoding: base64')
+    expect(Math.max(...raw.split(/\r?\n/).map((line) => line.length))).toBeLessThan(998)
+  })
+
+  test('existing HTML is unchanged rather than escaped twice', () => {
+    const html = '<p>Hello &amp; goodbye</p><p>Second paragraph</p>'
+    const mime = decodeDraftMime(buildGmailMimeMessage({ to, subject: 'Draft', body: html, draft: true }))
+    expect(mime).toContain(html)
+    expect(mime).not.toContain('&lt;p&gt;')
+  })
+
+  test('updating a generated HTML draft does not add a second wrapper', () => {
+    const mime = decodeDraftMime(buildGmailMimeMessage({ to, subject: 'Draft', body, draft: true }))
+    const html = mime.slice(mime.indexOf('<div style='))
+    const updated = decodeDraftMime(buildGmailMimeMessage({ to, subject: 'Updated', body: html, draft: true }))
+    expect(updated.match(/<div style=/g)).toHaveLength(1)
+    expect(updated).toContain(paragraph)
+    expect(updated).not.toContain('&lt;div')
+  })
+
+  test('direct plain-text messages remain plain text', () => {
+    const mime = decodeDraftMime(buildGmailMimeMessage({ to, subject: 'Send', body }))
+    expect(mime).toContain('Content-Type: text/plain')
+    expect(mime).toContain(paragraph)
+    expect(mime).not.toContain('<br>')
+  })
+
+  test('HTML draft retains attachments, recipients, and reply headers', () => {
+    const mime = decodeDraftMime(buildGmailMimeMessage({
+      to, subject: 'Draft', body, draft: true,
+      cc: [{ email: 'cc@example.test' }], bcc: [{ email: 'bcc@example.test' }],
+      inReplyTo: '<anchor@example.test>', references: '<older@example.test> <anchor@example.test>',
+      attachments: [{ filename: 'report.pdf', mimeType: 'application/pdf', content: Buffer.from('%PDF') }],
+    }))
+    expect(mime).toContain('text/html')
+    expect(mime).toContain('report.pdf')
+    expect(mime).toContain('cc@example.test')
+    expect(mime).toContain('bcc@example.test')
+    expect(mime).toContain('In-Reply-To: <anchor@example.test>')
+    expect(mime).toContain('References: <older@example.test> <anchor@example.test>')
+  })
+
+  test.each(['create', 'update', 'reply', 'forward'])('%s path generates HTML drafts', async (operation) => {
+    const client = new GmailClient({ auth: new OAuth2Client() })
+    const api = vi.fn().mockResolvedValue({ data: { id: 'draft_1' } })
+    const methods = (client as any).gmail.users.drafts
+    vi.spyOn(methods, 'create').mockImplementation(api)
+    vi.spyOn(methods, 'update').mockImplementation(api)
+    const anchor = {
+      id: 'anchor_1', subject: 'Original', body: 'Previous message', mimeType: 'text/plain',
+      from: { name: 'Sender Name', email: 'sender@example.test' }, to, date: '2026-10-01', labelIds: ['INBOX'],
+    }
+    vi.spyOn(client, 'getThread').mockResolvedValue({ parsed: { messages: [anchor] } } as any)
+    vi.spyOn(client, 'resolveThreadReply').mockResolvedValue({
+      to, anchorSubject: 'Original', inReplyTo: '<anchor@example.test>',
+      references: '<anchor@example.test>', source: 'explicit',
+    } as any)
+
+    if (operation === 'create') await client.createDraft({ to, subject: 'Draft', body })
+    if (operation === 'update') await client.updateDraft({ draftId: 'draft_1', to, subject: 'Draft', body })
+    if (operation === 'reply') await client.createDraftReply({ threadId: 'thread_1', body })
+    if (operation === 'forward') await client.createDraftForward({ threadId: 'thread_1', to, body })
+
+    expect(api).toHaveBeenCalledOnce()
+    const mime = decodeDraftMime(api.mock.calls[0][0].requestBody.message.raw)
+    expect(mime).toContain('Content-Type: text/html')
+    expect(mime).toContain(paragraph)
+    expect(mime).toContain('Hi,<br><br>')
+    if (operation === 'forward') expect(mime).toContain('Sender Name &lt;sender@example.test&gt;')
   })
 })

@@ -220,6 +220,8 @@ export function buildGmailMimeMessage({
   references,
   attachments,
   fromEmail,
+  draft = false,
+  plainText = false,
 }: {
   to: Array<{ name?: string; email: string }>
   subject: string
@@ -230,6 +232,8 @@ export function buildGmailMimeMessage({
   references?: string
   attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
   fromEmail?: string
+  draft?: boolean
+  plainText?: boolean
 }) {
   const msg = createMimeMessage()
 
@@ -249,10 +253,18 @@ export function buildGmailMimeMessage({
 
   msg.setSubject(subject)
 
-  const isHtml = /<[a-z][\s\S]*>/i.test(body)
+  const isHtml = !plainText && (draft
+    ? /<\/?(?:html|head|body|div|p|br|span|a|b|strong|i|em|u|ul|ol|li|table|tr|td|th|blockquote|pre|h[1-6]|img|hr)(?:\s[^<>]*|\/?)>/i.test(body)
+    : /<[a-z][\s\S]*>/i.test(body))
+  // Gmail's plain-text composer hard-wraps draft paragraphs on send.
+  // HTML keeps natural wrapping while preserving only the supplied line breaks.
+  const draftHtml = draft && !isHtml
+    ? `<div style="white-space:pre-wrap">${body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r\n|\r|\n/g, '<br>')}</div>`
+    : body
   msg.addMessage({
-    contentType: isHtml ? 'text/html' : 'text/plain',
-    data: body,
+    contentType: isHtml || draft ? 'text/html' : 'text/plain',
+    data: draft ? Buffer.from(draftHtml).toString('base64').replace(/.{1,76}/g, '$&\r\n').trimEnd() : body,
+    ...(draft ? { encoding: 'base64' as const } : {}),
   })
 
   if (inReplyTo) {
@@ -1031,7 +1043,7 @@ export class GmailClient {
     fromEmail?: string
     attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
   }) {
-    const raw = buildGmailMimeMessage({ to, subject, body, cc, bcc, attachments, fromEmail })
+    const raw = buildGmailMimeMessage({ to, subject, body, cc, bcc, attachments, fromEmail, draft: true })
 
     const res = await withRetry(() =>
       this.gmail.users.drafts.create({
@@ -1170,7 +1182,7 @@ export class GmailClient {
     fromEmail?: string
     attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
   }) {
-    const raw = buildGmailMimeMessage({ to, subject, body, cc, bcc, attachments, fromEmail })
+    const raw = buildGmailMimeMessage({ to, subject, body, cc, bcc, attachments, fromEmail, draft: true })
 
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() =>
@@ -1220,6 +1232,7 @@ export class GmailClient {
     if (envelope instanceof Error) return envelope
 
     const raw = buildGmailMimeMessage({
+      draft: true,
       to: envelope.to,
       subject: replySubject(envelope.anchorSubject),
       body,
@@ -1292,6 +1305,8 @@ export class GmailClient {
     ].join('\n')
 
     const raw = buildGmailMimeMessage({
+      draft: true,
+      plainText: true,
       to,
       subject: `Fwd: ${lastMsg.subject}`,
       body: fullBody,
