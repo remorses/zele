@@ -42,7 +42,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.2.0",
-    "@googleapis/gmail": "^16.1.1",
+    "@googleapis/gmail": "^22.0.1",
     "@opentui/core": "^0.2.12",
     "@opentui/react": "^0.2.12",
     "@termcast/utils": "^2.2.8",
@@ -52,7 +52,7 @@
     "errore": "^0.11.0",
     "fkill": "^10.0.3",
     "goke": "^6.15.1",
-    "google-auth-library": "^10.5.0",
+    "google-auth-library": "^11.2.0",
     "imapflow": "^1.2.18",
     "js-yaml": "^4.1.1",
     "mimetext": "^3.0.28",
