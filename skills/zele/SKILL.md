@@ -1,16 +1,17 @@
 ---
 name: zele
+repo: remorses/zele
 description: >
   zele is a multi-account email and calendar CLI for Gmail, IMAP/SMTP
   (Fastmail, Outlook, any provider), and Google Calendar. It reads,
   searches, sends, replies, forwards, archives, stars, and trashes emails,
-  waits for replies with `zele mail watch` (use it after sending instead
-  of ending the turn or sleeping), manages drafts, labels, attachments, and Gmail filters, and creates,
-  updates, and deletes calendar events with RSVP and free/busy support.
-  Output is YAML so commands can be piped through yq and xargs. ALWAYS
-  load this skill when the user asks to check email, read/send messages,
-  reply or forward, archive or trash threads, manage drafts or labels,
-  download attachments, schedule meetings, check their calendar, RSVP
+  waits for replies with `zele mail watch` (run it in a background shell
+  after sending), manages drafts, labels, attachments, and Gmail filters,
+  and creates, updates, and deletes calendar events with RSVP and
+  free/busy support. Output is YAML so commands can be piped through yq
+  and xargs. ALWAYS load this skill when the user asks to check email,
+  mentions an email they sent, read/send messages, reply or forward,
+  archive or trash threads, manage drafts or labels, download attachments, schedule meetings, check their calendar, RSVP
   to events, create a free permanent @zele.sh email address (receive-only
   for now) for themselves, a project, or an agent, or when they run any `zele`
   command. Load it before writing
@@ -35,6 +36,24 @@ zele --help # NEVER pipe to head/tail, read the full output
 
 The README and `zele --help` output are the source of truth for commands, options, flags, the Google vs IMAP feature matrix, search operators, and the headless login flow.
 
+## Reply follow-up
+
+After a successful send, reply, forward or draft send, or when the user mentions an email they sent, **check for a reply**, unless they ask not to monitor:
+
+1. **Check existing replies first.** Find the sent email on the right `--account` (ask if unclear). Search read and unread mail and `mail read` the candidates; note existing message IDs. Watch only sees mail that arrives after it starts. If a reply is already there, report it.
+2. **Otherwise watch in a background shell.** Run the watch command (printed by `mail send` / `mail reply`) with the shell tool's background mode, so you get a notification when it exits. Do not use a separate agent, bare `&`, `nohup` or `sleep`. Set the shell timeout longer than `--timeout`, or disable it. If you cannot get a completion notification, say that no monitoring is active.
+3. **Validate the match before you alert the user.** A match is a candidate only. `mail read` its `thread_id` and check that its `message_id` is a new **Message ID** from the expected sender that answers the sent email. The date comes from the sender's Date header, so an old date alone does not mean replay. If watch returns an old ID again, stop it and tell the user that monitoring is broken.
+4. **Handle exit 1.** It means timeout, auth error or another failure. Read stderr, tell the user, and check existing replies again before you restart.
+
+Monitoring never gives permission to send. Get approval for every reply or follow-up.
+
+```bash
+zele mail search 'from:bob@example.com subject:Question' --account me@example.com --limit 100
+# no reply yet: run this with the shell tool's background mode
+zele mail watch --account me@example.com --filter 'from:bob@example.com subject:"Question"' --timeout 259200
+zele mail read <thread_id> --account me@example.com
+```
+
 ## Rules
 
 1. **Never use the TUI.** Running `zele` with no subcommand launches a human-facing TUI. Agents must use the CLI subcommands (`zele mail list`, `zele cal events`, etc.) which output structured YAML.
@@ -50,18 +69,7 @@ The README and `zele --help` output are the source of truth for commands, option
    ```
 5. **Google-only features** (labels, Gmail filters, `zele cal *`, full profile) fail on IMAP accounts with a clear error. Check `zele whoami` output for account type before using them.
 6. **Headless Google login** requires a tmux wrapper because `zele login` is interactive. See the README "Remote / headless login" section for the exact pattern.
-7. **After sending, wait for the reply with `zele mail watch`.** Do not end your turn and do not `sleep`. `mail send` and `mail reply` print the exact command to run next, like `# Wait for the reply: zele mail watch --account ... --filter '...' --timeout 259200`. Run it right away. It blocks until the first **new** email matching the filter arrives (only emails that arrive after it starts can match), prints it with an `elapsed` field, and exits:
-   ```bash
-   zele mail send --to bob@example.com --subject "Question" --body "Hey, can you check this?"
-   zele mail watch --account me@example.com --filter 'from:bob@example.com subject:"Question"' --timeout 259200
-   # match: exit 0, then read it before answering
-   zele mail read <thread_id from the watch output>
-   ```
-   - Exit 0 means a match. Exit 1 means timeout (`Timed out after 3d 0h 0m 0s ...`). On timeout, run watch again or tell the user nobody replied yet.
-   - `--timeout 259200` is 3 days. People can take days to answer. Disable your shell tool timeout (e.g. `timeout: 0`) or set it **longer** than `--timeout`, or the tool kills the wait first. Every minute watch prints `# Still watching, 3m 0s elapsed` to stderr.
-   - Network errors do not stop the watch. It prints `# Poll failed ..., retrying` and polls again. Only auth errors stop it.
-   - If the matched email is not the expected one, run watch again with a more specific filter.
-   - Also use it for verification codes or any expected email: `zele mail watch --filter 'subject:verification' --timeout 300`.
+7. **Wait for expected emails with `zele mail watch`**, not `sleep`. For replies, follow the reply follow-up section above. For verification codes, check they did not already arrive, then: `zele mail watch --filter 'subject:verification' --timeout 300`.
 8. **Check reply recipients before sending** with `zele mail reply <thread-id> --dry-run`. Recipients are inferred from the thread, not from the sender of the last message, so a thread whose last message you sent still replies to the other person. If a reply would only reach the account's own address, zele refuses to send:
    ```bash
    # see to / cc / subject / In-Reply-To without sending

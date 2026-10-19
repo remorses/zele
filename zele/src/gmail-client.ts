@@ -1136,7 +1136,7 @@ export class GmailClient {
     if (drafts instanceof Error) return drafts
 
     return {
-      drafts: drafts.filter((d): d is NonNullable<typeof d> => d !== null),
+      drafts: drafts.filter(isTruthy),
       nextPageToken: res.data.nextPageToken ?? null,
     }
   }
@@ -1705,7 +1705,7 @@ export class GmailClient {
 
     if (counts instanceof Error) return counts
 
-    const result = counts.filter((c): c is NonNullable<typeof c> => c !== null)
+    const result = counts.filter(isTruthy)
 
     // Add archive count (same as Zero's count() method)
     if (!(archiveRes instanceof Error)) {
@@ -1748,9 +1748,8 @@ export class GmailClient {
   // Account / profile
   // =========================================================================
 
-  async getProfile(): Promise<{ emailAddress: string; messagesTotal: number; threadsTotal: number; historyId: string } | AuthError | ApiError> {
-    // Check cache
-    const cached = await this.getCachedProfile()
+  async getProfile({ skipCache = false }: { skipCache?: boolean } = {}): Promise<{ emailAddress: string; messagesTotal: number; threadsTotal: number; historyId: string } | AuthError | ApiError> {
+    const cached = skipCache ? undefined : await this.getCachedProfile()
     if (cached) return cached
 
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
@@ -2178,9 +2177,8 @@ export class GmailClient {
       throw new NotFoundError({ resource: `watch folder "${folder}". Supported: ${Object.keys(WATCH_FOLDER_LABELS).join(', ')}` })
     }
 
-    // Seed from the current mailbox state on every run. A cursor persisted
-    // from an earlier run would replay old emails as "new" matches.
-    const seed = await this.getProfile()
+    // Profile cache lasts 24 hours; its history cursor would replay old arrivals.
+    const seed = await this.getProfile({ skipCache: true })
     if (seed instanceof Error) throw seed
     let historyId = seed.historyId
 
@@ -2198,7 +2196,7 @@ export class GmailClient {
         console.error(`# Poll failed for ${this.account.email}, retrying: ${historyResult.message}`)
       } else if (historyResult instanceof Error) {
         // historyId expired — Google only keeps ~7 days. Re-seed.
-        const profile = await this.getProfile()
+        const profile = await this.getProfile({ skipCache: true })
         if (profile instanceof Error) throw profile
         historyId = profile.historyId
         // Retry once after reseed
@@ -2480,6 +2478,7 @@ const WATCH_FOLDER_LABELS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 function isHistoryExpired(err: any): boolean {
+  if (err instanceof ApiError) return isHistoryExpired(err.cause)
   const status = err?.code ?? err?.status ?? err?.response?.status
   if (status === 404) return true
   if (status === 400) {

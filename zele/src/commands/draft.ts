@@ -222,7 +222,7 @@ export function registerDraftCommands(cli: ZeleCli) {
   // =========================================================================
 
   cli
-    .command('draft send <draftId>', 'Send a draft')
+    .command('draft send <draftId>', 'Send a draft. To wait for the answer, check existing replies, then run mail watch')
     .action(async (draftId, options) => {
       const { client } = await getClient(options.account)
       const result = await client.sendDraft({ draftId })

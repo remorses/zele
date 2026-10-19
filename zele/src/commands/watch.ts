@@ -1,9 +1,7 @@
 // Mail watch command: poll for new emails using Gmail History API.
 // Exits as soon as the first matching email arrives (exit 0), or when the
 // optional --timeout expires with no match (exit 1). Agents use this to
-// block until a specific email appears, e.g. waiting for a reply after
-// sending an email. If the matched email wasn't the expected one, the agent
-// can simply call watch again with a more specific filter.
+// wait for a reply, then read the match to validate it.
 // Only emails that arrive after the command starts can match.
 //
 // Multi-account: watches all accounts concurrently, first match from any
@@ -22,6 +20,8 @@ import type { WatchEvent } from '../gmail-client.js'
 import { AuthError, abortableSleep } from '../api-utils.js'
 import * as out from '../output.js'
 
+export const REPLY_FOLLOW_UP_HINT = 'Check existing replies first: watch only sees new mail. Run watch in a background shell that notifies you on exit, then mail read the match before telling the user.'
+
 // ---------------------------------------------------------------------------
 // Register commands
 // ---------------------------------------------------------------------------
@@ -30,9 +30,10 @@ export function registerWatchCommands(cli: ZeleCli) {
   cli
     .command(
       'mail watch',
-      'Wait for a new email matching the filter, print it and exit. Only emails that arrive after the command starts match. ' +
-        'Agents: run this right after mail send or mail reply to wait for the answer, instead of ending your turn or sleeping. ' +
-        'Example: zele mail watch --filter "from:bob@example.com" --timeout 259200',
+      'Wait for the first new email matching the filter, print it and exit 0. Exit 1 on timeout or error. ' +
+        'After sending or when the user mentions a sent email, search existing replies first: watch only sees mail that arrives after it starts. ' +
+        'Agents: run it in a background shell that notifies you on exit. A match is a candidate: mail read its thread and check the message ID is new before telling the user. If it returns an old message again, monitoring is broken. ' +
+        'Example: zele mail watch --account me@example.com --filter "from:bob@example.com" --timeout 259200',
     )
     .option('--interval [interval]', z.string().describe('Poll interval in seconds (default: 15)'))
     .option('--folder [folder]', z.string().describe('Folder to watch (default: inbox)'))
@@ -141,7 +142,7 @@ export function registerWatchCommands(cli: ZeleCli) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatWatchEvent(event: WatchEvent): Record<string, unknown> {
+function formatWatchEvent(event: WatchEvent) {
   return {
     account: event.account.email,
     type: event.type,

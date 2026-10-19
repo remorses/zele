@@ -18,7 +18,7 @@ import { getThreadSeenMessageId, setThreadSeenMessageId } from '../db.js'
 import { hasUnsubscribeMechanism, hasOneClickUnsubscribe } from '../unsubscribe.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
-import { replyWatchCommand } from './watch.js'
+import { REPLY_FOLLOW_UP_HINT, replyWatchCommand } from './watch.js'
 import { colors as pc } from 'goke'
 
 // ---------------------------------------------------------------------------
@@ -329,10 +329,10 @@ export function registerMailCommands(cli: ZeleCli) {
   // =========================================================================
 
   cli
-    .command('mail read [...threadIds]', 'Read full email threads (does not mark as read)')
+    .command('mail read [...threadIds]', 'Read full email threads with per-message IDs (does not mark as read)')
     .option('--raw', 'Show raw message (first message only, single thread)')
     .option('--raw-html', 'Show raw HTML body per message (no markdown conversion)')
-    .option('--verify', 'Show expanded email authentication details (SPF/DKIM/DMARC)')
+    .option('--verify', 'Show expanded authentication details (SPF/DKIM/DMARC) and threading headers')
     .action(async (threadIds, options) => {
       if (threadIds.length === 0) {
         out.error('No thread IDs provided')
@@ -447,6 +447,12 @@ export function registerMailCommands(cli: ZeleCli) {
             console.log(pc.dim(`  Cc: ${msg.cc.map((c) => c.email).join(', ')}`))
           }
           console.log(pc.dim(`Date: ${dateStr}`))
+          console.log(pc.dim(`Message ID: ${msg.id}`))
+          if (options.verify) {
+            if (msg.messageId) console.log(pc.dim(`Message-ID: ${msg.messageId}`))
+            if (msg.inReplyTo) console.log(pc.dim(`In-Reply-To: ${msg.inReplyTo}`))
+            if (msg.references) console.log(pc.dim(`References: ${msg.references}`))
+          }
 
           if (msg.auth) {
             const check = (verdict: string) => {
@@ -492,7 +498,7 @@ export function registerMailCommands(cli: ZeleCli) {
   // =========================================================================
 
   cli
-    .command('mail send', 'Send an email. To wait for the answer, run zele mail watch right after (printed in the output) instead of ending your turn or sleeping')
+    .command('mail send', 'Send an email. To wait for the answer, check existing replies, then run mail watch (printed in the output)')
     .option('--to <to>', z.string().describe('Recipient email (repeatable with comma)'))
     .option('--subject <subject>', z.string().describe('Email subject'))
     .option('--body <body>', z.string().describe('Email body text'))
@@ -586,6 +592,7 @@ export function registerMailCommands(cli: ZeleCli) {
           recipient_source: result.recipientSource,
         })
         out.success(`Sent to ${result.to.join(', ')} in thread ${options.threadId}`)
+        out.hint(REPLY_FOLLOW_UP_HINT)
         out.hint(`Wait for the reply: ${replyWatchCommand({ account: email, to: result.to, subject: options.subject })}`)
         return
       }
@@ -612,6 +619,7 @@ export function registerMailCommands(cli: ZeleCli) {
 
       out.printYaml(result)
       out.success(`Sent to ${options.to}`)
+      out.hint(REPLY_FOLLOW_UP_HINT)
       out.hint(`Wait for the reply: ${replyWatchCommand({ account: email, to: to.map((r) => r.email), subject: options.subject })}`)
     })
 
@@ -620,7 +628,7 @@ export function registerMailCommands(cli: ZeleCli) {
   // =========================================================================
 
   cli
-    .command('mail reply <threadId>', 'Reply to an email thread. To wait for the answer, run zele mail watch right after (printed in the output) instead of ending your turn or sleeping')
+    .command('mail reply <threadId>', 'Reply to an email thread. To wait for the answer, check existing replies, then run mail watch (printed in the output)')
     .option('--body <body>', z.string().describe('Reply body text'))
     .option('--body-file <bodyFile>', z.string().describe('Read body from file (use - for stdin)'))
     .option('--to <to>', z.string().describe('Override the inferred recipient(s), comma-separated'))
@@ -758,6 +766,7 @@ export function registerMailCommands(cli: ZeleCli) {
         recipient_source: result.recipientSource,
       })
       out.success(`Reply sent to ${result.to.join(', ')}`)
+      out.hint(REPLY_FOLLOW_UP_HINT)
       out.hint(`Wait for the reply: ${replyWatchCommand({ account: accountEmail, to: result.to })}`)
     })
 
@@ -779,8 +788,8 @@ export function registerMailCommands(cli: ZeleCli) {
 
       const recipients = options.to
         .split(',')
-        .map((e: string) => ({ email: e.trim() }))
-        .filter((e: { email: string }) => e.email)
+        .map((e) => ({ email: e.trim() }))
+        .filter((e) => e.email)
 
       const { client } = await getClient(options.account)
 

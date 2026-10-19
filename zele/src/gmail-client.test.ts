@@ -2,6 +2,11 @@
 // Captures entity/encoding regressions in snippet fields from Gmail metadata responses.
 
 import { expect, test, describe, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { OAuth2Client } from 'googleapis-common'
 import {
   buildGmailMimeMessage,
@@ -15,6 +20,19 @@ import { formatFlags } from './output.js'
 
 const auth = new OAuth2Client()
 const client = new GmailClient({ auth })
+const WATCH_FIXTURE_TIMEOUT_MS = 3_000
+
+test('watch seeds and recovers from live history, not a cached profile', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'zele-watch-test-'))
+  await using cleanup = new AsyncDisposableStack()
+  cleanup.defer(() => fs.rmSync(home, { recursive: true, force: true }))
+  const result = await promisify(execFile)('bun', ['src/test-fixtures/gmail-watch.ts'], {
+    cwd: path.resolve(import.meta.dirname, '..'),
+    env: { ...process.env, HOME: home },
+    signal: AbortSignal.timeout(WATCH_FIXTURE_TIMEOUT_MS),
+  })
+  expect(result.stdout).toContain('Cached profiles preserved; two fresh watches and live recovery verified')
+})
 
 function listThread(messages: Array<{
   from: string

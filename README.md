@@ -174,15 +174,17 @@ Use `mail send --thread-id` when you want full control over recipients and subje
 zele mail send --thread-id <thread-id> --to paul@acme.com --cc dana@acme.com --body "…"
 ```
 
-`mail watch` blocks until the first **new** email matching the filter arrives, prints it with the `elapsed` wait time, and exits (code 0). Only emails that arrive after it starts can match. If `--timeout` is set and no match arrives in time, it exits with code 1. While waiting it prints `# Still watching, 3m 0s elapsed` to stderr every minute. Network errors do not stop it; it retries on the next poll, so waiting days (`--timeout 259200`) is fine.
+`mail watch` blocks until the first **new** email matching the filter arrives, prints it with the `elapsed` wait time, and exits 0. Exit 1 means timeout, auth error or another failure; stderr says which. Poll errors are retried and a heartbeat prints every minute, so waiting days (`--timeout 259200`) is fine.
 
-Agents should run it **right after** `mail send` or `mail reply` to wait for the answer, instead of ending their turn or sleeping. Both commands print the exact watch command to run:
+**Check existing replies first.** Watch only sees mail that arrives after it starts. `mail send` and `mail reply` print the watch command to run next:
 
 ```bash
-zele mail send --to bob@example.com --subject "Question" --body "Hey, can you check this?"
-# Wait for the reply: zele mail watch --account me@example.com --filter 'from:bob@example.com subject:"Question"' --timeout 259200
+zele mail search 'from:bob@example.com subject:Question' --account me@example.com --limit 100
 zele mail watch --account me@example.com --filter 'from:bob@example.com subject:"Question"' --timeout 259200
+zele mail read <thread_id> --account me@example.com
 ```
+
+**Agents** should run watch with their shell tool's background mode, so the same agent is notified when it exits. Use completion notifications, not a separate agent or detached `&` / `nohup` process. A match is only a candidate: `mail read` its thread and check that `message_id` is a new **Message ID** from the expected sender that replies to the tracked email before telling the user. `mail read --verify` also shows `Message-ID`, `In-Reply-To` and `References`. If watch returns the same old message again, stop it and report that monitoring is broken. Monitoring never gives permission to send a follow-up.
 
 **Body formatting.** Write each paragraph as **one line**. Separate paragraphs with one blank line. Never hard-wrap lines at 72-80 columns: mail clients reflow text themselves, and hard breaks show up as broken mid-sentence lines. Capitalize the first word of every paragraph, also after a greeting that ends with a comma. These rules also apply to drafts you show the user before sending.
 

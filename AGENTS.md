@@ -2,6 +2,14 @@ this project uses bun as package manager. the cli should support both bun and no
 
 the TUI (the root command) is only supported in bun. our bin file tries to use bun to run the cli if available
 
+## architecture
+
+- `zele/src/cli.ts` registers command modules; commands own CLI input/output.
+- Mail clients (`gmail-client.ts`, `imap-smtp-client.ts`) own provider API calls, caching and watch cursors. Gmail watch reads a live history cursor, never the 24-hour profile cache.
+- `zele/src/db.ts` owns the SQLite connection; `schema.ts` and `schema.sql` define storage.
+- Root `README.md` and `skills/zele/SKILL.md` are the source docs. Copies in `zele/` are generated.
+- `mail watch` only waits and prints a candidate. Backgrounding, reply validation and send approval are the agent's job (see the skill).
+
 ## development
 
 to run the cli locally use `bun zele/src/cli.ts` (or `bun src/cli.ts` inside `zele/`). this repo is a bun workspace: `zele/` is the CLI package
