@@ -327,6 +327,12 @@ export async function loginWithRefreshToken(
 
   const saved = saveGoogleAccount(profile.emailAddress, clientId, tokens)
   if (saved instanceof Error) return saved
+  // The imported token replaces this address's sign-ins on other OAuth apps, so
+  // the account isn't listed (and synced) twice.
+  const db = getDb()
+  db.delete(schema.account)
+    .where(orm.and(orm.eq(schema.account.email, profile.emailAddress), orm.ne(schema.account.appId, clientId)))
+    .run()
   return { email: profile.emailAddress, appId: clientId }
 }
 
