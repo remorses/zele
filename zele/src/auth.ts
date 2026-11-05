@@ -14,6 +14,8 @@ type GoogleTokens = {
   token_type?: string | null
   id_token?: string | null
   scope?: string
+  /** Token endpoint of a refresh broker that holds the client secret (see loginWithRefreshToken). */
+  token_url?: string
 }
 import { colors as pc } from 'goke'
 import * as orm from 'drizzle-orm'
@@ -179,13 +181,15 @@ function resolveOAuthClient(appId?: string) {
  * client credentials from OAUTH_CLIENTS by client ID. Falls back to
  * the active client / env vars.
  */
-export function createOAuth2Client(appId?: string): OAuth2Client {
+export function createOAuth2Client(appId?: string, tokenUrl?: string): OAuth2Client {
   const { clientId, clientSecret, redirectPort } = resolveOAuthClient(appId)
 
   return new OAuth2Client({
     clientId,
-    clientSecret,
+    // A broker refreshes with its own secret; ours would leak to it.
+    clientSecret: tokenUrl ? undefined : clientSecret,
     redirectUri: `http://localhost:${redirectPort}`,
+    ...(tokenUrl ? { endpoints: { oauth2TokenUrl: tokenUrl } } : {}),
   })
 }
 
@@ -264,16 +268,22 @@ export async function login(
   if (profile instanceof Error) return profile
   const email = profile.emailAddress
 
-  // Upsert account in DB
+  const saved = saveGoogleAccount(email, resolved.clientId, tokens)
+  if (saved instanceof Error) return saved
+
+  return { email, appId: resolved.clientId, client }
+}
+
+function saveGoogleAccount(email: string, appId: string, tokens: GoogleTokens): void | Error {
   const db = getDb()
   const googleCapabilities = 'gmail,calendar,smtp'
   const now = new Date()
-  const upsertResult = await errore.tryAsync({
-    try: async () => {
+  return errore.try({
+    try: () => {
       db.insert(schema.account)
         .values({
           email,
-          appId: resolved.clientId,
+          appId,
           accountType: 'google',
           capabilities: googleCapabilities,
           accountStatus: 'active',
@@ -289,9 +299,35 @@ export async function login(
     },
     catch: (err) => new Error(`Failed to save account ${email}`, { cause: err }),
   })
-  if (upsertResult instanceof Error) return upsertResult
+}
 
-  return { email, appId: resolved.clientId, client }
+/**
+ * Add a Google account from a refresh token obtained elsewhere (e.g. a web app
+ * that ran the consent flow on a server). `tokenUrl` is that server's token
+ * endpoint: it holds the client secret, so this machine refreshes through it
+ * and never sees the secret. Verifies the token with a real API call first.
+ */
+export async function loginWithRefreshToken(
+  refreshToken: string,
+  clientId: string,
+  tokenUrl: string,
+): Promise<{ email: string; appId: string } | Error> {
+  const oauth2Client = createOAuth2Client(clientId, tokenUrl)
+  oauth2Client.setCredentials({ refresh_token: refreshToken })
+  const refreshed = await errore.tryAsync({
+    try: () => oauth2Client.refreshAccessToken(),
+    catch: (err) => new Error('Failed to refresh the access token', { cause: err }),
+  })
+  if (refreshed instanceof Error) return refreshed
+
+  const tokens: GoogleTokens = { ...refreshed.credentials, refresh_token: refreshToken, token_url: tokenUrl }
+  oauth2Client.setCredentials(tokens)
+  const profile = await new GmailClient({ auth: oauth2Client }).getProfile()
+  if (profile instanceof Error) return profile
+
+  const saved = saveGoogleAccount(profile.emailAddress, clientId, tokens)
+  if (saved instanceof Error) return saved
+  return { email: profile.emailAddress, appId: clientId }
 }
 
 // ---------------------------------------------------------------------------
@@ -650,7 +686,7 @@ async function authenticateAccount(account: AccountId): Promise<OAuth2Client> {
   }
 
   const tokens: GoogleTokens = JSON.parse(row.tokens)
-  const oauth2Client = createOAuth2Client(account.appId)
+  const oauth2Client = createOAuth2Client(account.appId, tokens.token_url)
   oauth2Client.setCredentials(tokens)
 
   // Refresh if expired — merge to preserve refresh_token which Google
