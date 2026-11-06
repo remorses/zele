@@ -8,7 +8,7 @@ import { z } from 'zod'
 import * as errore from 'errore'
 import { isAgent, type GokeExecutionContext } from 'goke'
 import * as clack from '@clack/prompts'
-import { login, loginImap, loginMicrosoft, logout, listAccounts, getAuthStatuses, getZeleShSession, listZeleShAccounts, removeZeleShSession } from '../auth.js'
+import { login, loginWithRefreshToken, loginImap, loginMicrosoft, logout, listAccounts, getAuthStatuses, getZeleShSession, listZeleShAccounts, removeZeleShSession } from '../auth.js'
 import { runZeleLogin } from './inbox.js'
 import { resolveZeleApiUrl } from '../zele-sh-client.js'
 import { closeDb } from '../db.js'
@@ -283,6 +283,28 @@ export function registerAuthCommands(cli: ZeleCli) {
       out.success(`Authenticated ${result.email} (${caps})`)
       await closeDb()
       process.exit(0)
+    })
+
+  cli
+    .command(
+      'login google-token',
+      'Add a Google account from a refresh token read on stdin (no browser). Used by apps that run the Google consent on their server: the machine refreshes through that server (--token-url), which keeps the client secret',
+    )
+    .option('--client-id <clientId>', z.string().describe('OAuth client ID the refresh token was issued to'))
+    .option('--token-url <tokenUrl>', z.string().url().describe('Token endpoint that refreshes for this client (holds the secret)'))
+    .example("printf '%s' \"$REFRESH_TOKEN\" | zele login google-token --client-id 123.apps.googleusercontent.com --token-url https://example.com/oauth/google/token")
+    .action(async (options) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of process.stdin) chunks.push(chunk)
+      const refreshToken = Buffer.concat(chunks).toString('utf-8').trim()
+      if (!refreshToken || !options.clientId || !options.tokenUrl) {
+        out.error('Usage: printf %s "$REFRESH_TOKEN" | zele login google-token --client-id <id> --token-url <url>')
+        process.exit(1)
+      }
+      const result = await loginWithRefreshToken(refreshToken, options.clientId, options.tokenUrl)
+      if (result instanceof Error) handleCommandError(result)
+      out.success(`Authenticated as ${result.email}`)
+      await closeDb()
     })
 
   cli
