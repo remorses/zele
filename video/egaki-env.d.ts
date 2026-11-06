@@ -1,0 +1,1 @@
+import 'egaki/mdx-components'

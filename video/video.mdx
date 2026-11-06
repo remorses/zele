@@ -1,0 +1,57 @@
+---
+fps: 30
+---
+
+import {
+  Backdrop,
+  Hook,
+  Title,
+  Diagram,
+  TerminalScene,
+  Signup,
+  Features,
+  Outro,
+  INBOX_STEPS,
+  VERIFY_STEPS,
+  SEND_STEPS,
+} from './components'
+
+<Backdrop />
+
+<Audio src="/music.mp3" volume={(f) => 0.3 * Math.min(1, f / 20, Math.max(0, (1530 - f) / 60))} />
+
+# Hook duration=3.4s
+
+<Hook />
+
+# Title duration=3.4s
+
+<Title />
+
+# Diagram duration=6s
+
+<Diagram />
+
+# Inbox duration=7s
+
+<TerminalScene index="01" label="new · zele.sh inboxes" headline="Get a real *email address* in one command." title="agent — zsh" steps={INBOX_STEPS} />
+
+# Signup duration=4.8s
+
+<Signup email="signup-bot@zele.sh" />
+
+# Verify duration=7.5s
+
+<TerminalScene index="03" label="mail watch" headline="Then just *wait* for the code." title="agent — zsh" steps={VERIFY_STEPS} />
+
+# Send duration=8.5s
+
+<TerminalScene index="04" label="read & send" headline="Read, reply, and *wait* for the answer." title="agent — you@gmail.com" steps={SEND_STEPS} />
+
+# Features duration=5.5s
+
+<Features />
+
+# Outro duration=4.6s
+
+<Outro />
