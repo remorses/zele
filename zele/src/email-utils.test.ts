@@ -649,7 +649,8 @@ describe('buildOutgoingMime', () => {
     const transporter = nodemailer.createTransport({
       streamTransport: true,
       buffer: true,
-      newline: 'unix',
+      // SMTP sends CRLF; nodemailer 8.0.11 applies `newline` to raw messages too
+      newline: 'windows',
     })
     const info = await transporter.sendMail({
       envelope: { from: 'tommy@notaku.so', to: ['recipient@example.test'] },
