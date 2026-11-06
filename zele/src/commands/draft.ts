@@ -11,6 +11,8 @@ import { getClients, getClient } from '../auth.js'
 import type { GmailClient } from '../gmail-client.js'
 import type { ImapSmtpClient } from '../imap-smtp-client.js'
 import { AuthError } from '../api-utils.js'
+import { downloadAttachments } from '../email-utils.js'
+import { resolveAttachments } from './mail.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 import { colors as pc, isAgent } from 'goke'
@@ -122,6 +124,7 @@ export function registerDraftCommands(cli: ZeleCli) {
     .option('--bcc <bcc>', z.string().describe('BCC recipients (comma-separated)'))
     .option('--thread <thread>', z.string().describe('Thread ID to associate with'))
     .option('--from <from>', z.string().describe('Send-as alias email'))
+    .option('--attach <attach>', z.array(z.string()).describe('File to attach (repeatable: --attach a.pdf --attach b.png)'))
     .action(async (options) => {
       if (!options.to) {
         out.error('--to is required')
@@ -148,6 +151,8 @@ export function registerDraftCommands(cli: ZeleCli) {
       const parseEmails = (str: string) =>
         str.split(',').map((e) => e.trim()).filter(Boolean).map((email) => ({ email }))
 
+      const attachments = resolveAttachments(options.attach)
+
       const { client } = await getClient(options.account)
 
       const result = await client.createDraft({
@@ -158,6 +163,7 @@ export function registerDraftCommands(cli: ZeleCli) {
         bcc: options.bcc ? parseEmails(options.bcc) : undefined,
         threadId: options.thread,
         fromEmail: options.from,
+        attachments,
       })
       if (result instanceof Error) handleCommandError(result)
 
@@ -178,7 +184,10 @@ export function registerDraftCommands(cli: ZeleCli) {
     .option('--cc <cc>', z.string().describe('New CC recipients (comma-separated)'))
     .option('--bcc <bcc>', z.string().describe('New BCC recipients (comma-separated)'))
     .option('--from <from>', z.string().describe('Send-as alias email'))
+    .option('--attach <attach>', z.array(z.string()).describe('File to add to the existing attachments (repeatable: --attach a.pdf --attach b.png)'))
     .action(async (draftId, options) => {
+      const newAttachments = resolveAttachments(options.attach) ?? []
+
       const { client } = await getClient(options.account)
 
       // Fetch existing draft to merge unchanged fields
@@ -201,8 +210,17 @@ export function registerDraftCommands(cli: ZeleCli) {
       const parseEmails = (str: string) =>
         str.split(',').map((e) => e.trim()).filter(Boolean).map((email) => ({ email }))
 
+      // The draft is rebuilt from scratch, so existing attachments must be re-uploaded.
+      const existingAttachments = await downloadAttachments({
+        client,
+        messageId: existing.message.id,
+        attachments: existing.message.attachments,
+      })
+      if (existingAttachments instanceof Error) handleCommandError(existingAttachments)
+
       const result = await client.updateDraft({
         draftId,
+        attachments: [...existingAttachments, ...newAttachments],
         to: options.to ? parseEmails(options.to) : existing.to,
         subject: options.subject ?? existing.message.subject,
         body: body ?? existing.message.body,

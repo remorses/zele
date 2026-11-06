@@ -273,6 +273,8 @@ zele mail watch --filter "from:github has:attachment" --timeout 300
 ```bash
 zele draft list
 zele draft create
+zele draft create --attach report.pdf --attach logo.png  # draft with attachments
+zele draft update <draft-id> --attach extra.pdf          # add a file, keep existing ones
 zele draft send <draft-id>
 zele draft delete <draft-id>
 ```

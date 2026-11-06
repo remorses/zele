@@ -231,6 +231,27 @@ describe('parseAuthResults', () => {
     `)
   })
 
+  test('attachment IDs are stable MIME part IDs, not Gmail per-fetch IDs', () => {
+    // Gmail returns a new body.attachmentId on every messages.get.
+    const fetchWithAttachmentId = (gmailAttachmentId: string) => client.parseMessage({
+      id: 'msg_att_1',
+      threadId: 'thread_att_1',
+      payload: {
+        partId: '',
+        mimeType: 'multipart/mixed',
+        headers: [{ name: 'Subject', value: 'Files' }, { name: 'From', value: 'a@example.com' }],
+        parts: [
+          { partId: '0', mimeType: 'text/plain', body: { data: Buffer.from('hi').toString('base64url') } },
+          { partId: '1', mimeType: 'application/pdf', filename: 'doc.pdf', body: { attachmentId: gmailAttachmentId, size: 10 } },
+        ],
+      },
+    } as any)
+    const first = fetchWithAttachmentId('ANGjdJ-first')
+    const second = fetchWithAttachmentId('ANGjdJ-second')
+    expect(first.attachments).toEqual(second.attachments)
+    expect(first.attachments.map((a) => `${a.attachmentId} ${a.filename}`)).toEqual(['1 doc.pdf'])
+  })
+
   test('parseMessage prefers Gmail trusted header over upstream headers', () => {
     const rawMessage = {
       id: 'msg_multi_auth',

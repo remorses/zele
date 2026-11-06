@@ -14,7 +14,7 @@ import type SMTPTransport from 'nodemailer/lib/smtp-transport/index.js'
 import { createMimeMessage } from 'mimetext'
 import * as errore from 'errore'
 import { AuthError, ApiError, UnsupportedError, EmptyThreadError, NotFoundError, SelfRecipientError, AmbiguousRecipientError, UnseenLatestError, mapConcurrent, withRetry, abortableSleep } from './api-utils.js'
-import { buildOutgoingMime, resolveReplyRecipients, replySubject, threadAnchor, checkThreadLatestSeen, type SentInThread, type ThreadReplyEnvelope } from './email-utils.js'
+import { buildOutgoingMime, downloadAttachments, resolveReplyRecipients, replySubject, threadAnchor, checkThreadLatestSeen, type SentInThread, type ThreadReplyEnvelope } from './email-utils.js'
 import { renderEmailBody } from './output.js'
 import type { AccountId, ImapSmtpCredentials } from './auth.js'
 import type {
@@ -1120,23 +1120,19 @@ export class ImapSmtpClient {
     return this.withImap(async (client) => {
       const lock = await client.getMailboxLock(folder)
       try {
-        // attachmentId is the MIME part number (e.g. "2", "1.2")
-        for await (const msg of client.fetch(String(uid), {
-          uid: true,
-          bodyParts: [attachmentId],
-        }, { uid: true })) {
-          const parts = msg.bodyParts
-          if (parts) {
-            for (const [_key, value] of parts) {
-              return value.toString('base64')
-            }
-          }
+        // attachmentId is the MIME part number (e.g. "2", "1.2"). download()
+        // removes the transfer encoding; fetch bodyParts returns it still encoded.
+        const download = await client.download(String(uid), attachmentId, { uid: true })
+        if (!download.content) {
+          return new NotFoundError({ resource: `attachment ${attachmentId} in message ${messageId}` })
         }
-        return new NotFoundError({ resource: `attachment ${attachmentId} in message ${messageId}` })
+        const chunks: Buffer[] = []
+        for await (const chunk of download.content) chunks.push(chunk)
+        return Buffer.concat(chunks).toString('base64')
       } finally {
         lock.release()
       }
-    }) as Promise<string | NotFoundError | AuthError | ApiError>
+    })
   }
 
   // =========================================================================
@@ -1287,8 +1283,8 @@ export class ImapSmtpClient {
     body,
     cc,
     bcc,
-    threadId,
     fromEmail,
+    attachments,
   }: {
     to: Array<{ name?: string; email: string }>
     subject: string
@@ -1299,37 +1295,31 @@ export class ImapSmtpClient {
     fromEmail?: string
     attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
   }) {
-    // Build MIME message and APPEND to Drafts folder
-    const headers = [
-      `From: ${fromEmail ?? this.account.email}`,
-      `To: ${to.map((r) => r.name ? `"${r.name}" <${r.email}>` : r.email).join(', ')}`,
-      `Subject: ${subject}`,
-      `Date: ${new Date().toUTCString()}`,
-      `MIME-Version: 1.0`,
-      `Content-Type: text/plain; charset=utf-8`,
-    ]
-    if (cc && cc.length > 0) {
-      headers.push(`Cc: ${cc.map((r) => r.name ? `"${r.name}" <${r.email}>` : r.email).join(', ')}`)
-    }
-    if (bcc && bcc.length > 0) {
-      headers.push(`Bcc: ${bcc.map((r) => r.name ? `"${r.name}" <${r.email}>` : r.email).join(', ')}`)
-    }
+    const formatList = (list?: Array<{ name?: string; email: string }>) =>
+      list && list.length > 0 ? list.map((r) => r.name ? `"${r.name}" <${r.email}>` : r.email).join(', ') : undefined
 
-    const raw = headers.join('\r\n') + '\r\n\r\n' + body
-    const rawBuffer = Buffer.from(raw)
+    const rawMime = await buildOutgoingMime({
+      from: fromEmail ?? this.account.email,
+      to: formatList(to) ?? '',
+      subject,
+      text: body,
+      cc: formatList(cc),
+      bcc: formatList(bcc),
+      attachments,
+      keepBcc: true,
+    })
+    if (rawMime instanceof Error) return rawMime
 
-    const result = await this.withImap(async (client) => {
+    return this.withImap(async (client) => {
       const draftsPath = await this.resolveMailboxPath(client, 'drafts')
-      const appendResult = await client.append(draftsPath, rawBuffer, ['\\Draft', '\\Seen'])
-      const uid = appendResult && typeof appendResult === 'object' && 'uid' in appendResult ? appendResult.uid : undefined
+      const appendResult = await client.append(draftsPath, rawMime, ['\\Draft', '\\Seen'])
+      const uid = appendResult ? appendResult.uid : undefined
       return {
         id: uid ? makeThreadId(draftsPath, uid) : 'unknown',
         message: { id: 'unknown' },
         threadId: uid ? makeThreadId(draftsPath, uid) : 'unknown',
       }
     })
-    if (result instanceof Error) throw result
-    return result
   }
 
   async getDraft({ draftId }: { draftId: string }) {
@@ -1351,12 +1341,20 @@ export class ImapSmtpClient {
     const draft = await this.getDraft({ draftId })
     if (draft instanceof Error) return draft
 
+    const attachments = await downloadAttachments({
+      client: this,
+      messageId: draft.message.id,
+      attachments: draft.message.attachments,
+    })
+    if (attachments instanceof Error) return attachments
+
     const result = await this.sendMessage({
       to: draft.to,
       subject: draft.message.subject,
       body: draft.message.body,
       cc: draft.cc.length > 0 ? draft.cc : undefined,
       bcc: draft.bcc.length > 0 ? draft.bcc : undefined,
+      attachments,
     })
     if (result instanceof Error) return result
 
@@ -1380,8 +1378,8 @@ export class ImapSmtpClient {
   }
 
   /**
-   * Update an existing draft. IMAP has no native update — we delete the old
-   * draft and APPEND a new message to the Drafts folder.
+   * Update an existing draft. IMAP has no native update: APPEND the new
+   * message first, then delete the old one, so a failure never loses the draft.
    */
   async updateDraft({
     draftId,
@@ -1391,6 +1389,7 @@ export class ImapSmtpClient {
     cc,
     bcc,
     fromEmail,
+    attachments,
   }: {
     draftId: string
     to: Array<{ name?: string; email: string }>
@@ -1402,12 +1401,13 @@ export class ImapSmtpClient {
     fromEmail?: string
     attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
   }) {
-    // Delete old draft first — check for errors before creating replacement
+    const created = await this.createDraft({ to, subject, body, cc, bcc, fromEmail, attachments })
+    if (created instanceof Error) return created
+
     const deleted = await this.deleteDraft({ draftId })
     if (deleted instanceof Error) return deleted
 
-    // Create new draft with updated content
-    return this.createDraft({ to, subject, body, cc, bcc, fromEmail })
+    return created
   }
 
   /**
@@ -1784,6 +1784,10 @@ export class ImapSmtpClient {
       const partBody = part.slice(splitPos + (partHeaderEnd !== -1 ? 4 : 2))
       const partContentType = this.getHeader(partHeaders, 'content-type') ?? 'text/plain'
       const partEncoding = this.getHeader(partHeaders, 'content-transfer-encoding') ?? '7bit'
+
+      // A .txt or .html attachment is not the message body.
+      const disposition = this.getHeader(partHeaders, 'content-disposition')
+      if (disposition?.split(';')[0]?.trim().toLowerCase() === 'attachment') continue
 
       // Recursive multipart
       const nestedBoundary = partContentType.match(/boundary="?([^";\s]+)"?/i)

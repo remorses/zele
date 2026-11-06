@@ -87,7 +87,7 @@ async function loadSeenMessageId({
   return seen
 }
 
-function resolveAttachments(filePaths?: string[]) {
+export function resolveAttachments(filePaths?: string[]) {
   return filePaths
     ? filePaths.map((filePath) => {
         const resolved = path.resolve(filePath)

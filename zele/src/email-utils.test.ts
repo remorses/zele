@@ -614,6 +614,26 @@ describe('buildOutgoingMime', () => {
     expect(mime).toContain('No files')
   })
 
+  test('IMAP draft MIME keeps Bcc and attachment, sent MIME drops Bcc', async () => {
+    const build = (keepBcc: boolean) => buildOutgoingMime({
+      from: 'tommy@notaku.so',
+      to: 'recipient@example.test',
+      bcc: 'hidden@example.test',
+      subject: 'Draft',
+      text: 'Draft body',
+      attachments: [{ filename: 'invoice.pdf', mimeType: 'application/pdf', content: pdf }],
+      keepBcc,
+    })
+    const draft = await build(true)
+    const sent = await build(false)
+    expect(draft).not.toBeInstanceOf(Error)
+    expect(sent).not.toBeInstanceOf(Error)
+    const draftMime = (draft as Buffer).toString('utf8')
+    expect(draftMime).toMatch(/^Bcc:\s*hidden@example\.test/im)
+    expect(attachmentBytes(draftMime, 'invoice.pdf')).toEqual(pdf)
+    expect((sent as Buffer).toString('utf8')).not.toMatch(/^Bcc:/im)
+  })
+
   test('SMTP stream transport sends the same MIME including the PDF', async () => {
     const messageId = '<probe-id@notaku.so>'
     const raw = await buildOutgoingMime({

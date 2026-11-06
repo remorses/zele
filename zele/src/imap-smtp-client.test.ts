@@ -9,6 +9,7 @@ import {
   imapTlsOptions,
 } from './imap-smtp-client.js'
 import type { FetchMessageObject } from 'imapflow'
+import { buildOutgoingMime } from './email-utils.js'
 
 describe('IMAP MIME body decoding', () => {
   const client = new ImapSmtpClient({
@@ -45,6 +46,23 @@ describe('IMAP MIME body decoding', () => {
         expect(result.textBody?.trimEnd()).toBe(text)
       }
     }
+  })
+
+  test('text and html attachments do not replace the draft body', async () => {
+    const source = await buildOutgoingMime({
+      from: 'reader@example.com',
+      to: 'peer@example.com',
+      subject: 'Draft',
+      text: 'Actual draft body',
+      attachments: [
+        { filename: 'notes.txt', mimeType: 'text/plain', content: Buffer.from('TXT ATTACHMENT') },
+        { filename: 'page.html', mimeType: 'text/html', content: Buffer.from('<p>HTML ATTACHMENT</p>') },
+      ],
+    })
+    expect(source).not.toBeInstanceOf(Error)
+    const result = client.parseImapMessage({ message: { uid: 1, source } as FetchMessageObject, folder: 'Drafts' })
+    expect(result.body.trimEnd()).toBe('Actual draft body')
+    expect(result.mimeType).toBe('text/plain')
   })
 
   test('combines literal and escaped bytes before decoding UTF-8', () => {

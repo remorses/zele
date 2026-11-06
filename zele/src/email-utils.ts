@@ -22,7 +22,7 @@ export type OutgoingAttachment = {
   content: Buffer
 }
 
-/** Compile one RFC 822 buffer for SMTP DATA and IMAP Sent APPEND. */
+/** Compile one RFC 822 buffer for SMTP DATA, IMAP Sent APPEND and IMAP Drafts APPEND. */
 export async function buildOutgoingMime({
   from,
   to,
@@ -34,6 +34,7 @@ export async function buildOutgoingMime({
   references,
   attachments,
   messageId,
+  keepBcc = false,
 }: {
   from: string
   to: string
@@ -45,6 +46,8 @@ export async function buildOutgoingMime({
   references?: string
   attachments?: OutgoingAttachment[]
   messageId?: string
+  /** Drafts keep the Bcc header so a later send still knows the recipients. */
+  keepBcc?: boolean
 }): Promise<Buffer | ApiError> {
   const mail: ConstructorParameters<typeof MailComposer>[0] = {
     from,
@@ -66,9 +69,33 @@ export async function buildOutgoingMime({
   }
 
   return errore.tryAsync({
-    try: () => new MailComposer(mail).compile().build(),
+    try: () => {
+      const node = new MailComposer(mail).compile()
+      node.keepBcc = keepBcc
+      return node.build()
+    },
     catch: (err) => new ApiError({ reason: `Failed to compile MIME: ${String(err)}`, cause: err }),
   })
+}
+
+/** Download a message's attachments so they can be attached again,
+ *  e.g. when a draft is rebuilt by update or sent through SMTP. */
+export async function downloadAttachments({
+  client,
+  messageId,
+  attachments,
+}: {
+  client: { getAttachment(args: { messageId: string; attachmentId: string }): Promise<string | Error> }
+  messageId: string
+  attachments: Array<{ attachmentId: string; filename: string; mimeType: string }>
+}): Promise<OutgoingAttachment[] | Error> {
+  const result: OutgoingAttachment[] = []
+  for (const att of attachments) {
+    const data = await client.getAttachment({ messageId, attachmentId: att.attachmentId })
+    if (data instanceof Error) return data
+    result.push({ filename: att.filename, mimeType: att.mimeType, content: Buffer.from(data, 'base64') })
+  }
+  return result
 }
 
 export interface Sender {

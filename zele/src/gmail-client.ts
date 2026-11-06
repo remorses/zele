@@ -160,6 +160,16 @@ const SYSTEM_LABEL_IDS = new Set([
 // Helpers
 // ---------------------------------------------------------------------------
 
+function findPartById(part: gmail_v1.Schema$MessagePart | undefined, partId: string): gmail_v1.Schema$MessagePart | undefined {
+  if (!part) return undefined
+  if (part.partId === partId) return part
+  for (const child of part.parts ?? []) {
+    const found = findPartById(child, partId)
+    if (found) return found
+  }
+  return undefined
+}
+
 function decodeBase64Url(encoded: string) {
   const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
   return Buffer.from(base64, 'base64').toString('utf-8')
@@ -1049,14 +1059,17 @@ export class GmailClient {
   }) {
     const raw = buildGmailMimeMessage({ to, subject, body, cc, bcc, attachments, fromEmail })
 
-    const res = await withRetry(() =>
-      this.gmail.users.drafts.create({
-        userId: 'me',
-        requestBody: {
-          message: { raw, threadId },
-        },
-      }),
+    const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+      withRetry(() =>
+        this.gmail.users.drafts.create({
+          userId: 'me',
+          requestBody: {
+            message: { raw, threadId },
+          },
+        }),
+      ),
     )
+    if (res instanceof Error) return res
 
     return res.data
   }
@@ -1724,20 +1737,37 @@ export class GmailClient {
   // Attachments
   // =========================================================================
 
+  /** `attachmentId` is the MIME part ID from AttachmentMeta. Gmail's own
+   *  attachment ID changes on every messages.get, so it is resolved here. */
   async getAttachment({
     messageId,
     attachmentId,
   }: {
     messageId: string
     attachmentId: string
-  }) {
-    const res = await withRetry(() =>
-      this.gmail.users.messages.attachments.get({
-        userId: 'me',
-        messageId,
-        id: attachmentId,
-      }),
+  }): Promise<string | NotFoundError | AuthError | ApiError> {
+    const message = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+      withRetry(() =>
+        this.gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' }),
+      ),
     )
+    if (message instanceof Error) return message
+
+    const gmailAttachmentId = findPartById(message.data.payload, attachmentId)?.body?.attachmentId
+    if (!gmailAttachmentId) {
+      return new NotFoundError({ resource: `attachment ${attachmentId} in message ${messageId}` })
+    }
+
+    const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+      withRetry(() =>
+        this.gmail.users.messages.attachments.get({
+          userId: 'me',
+          messageId,
+          id: gmailAttachmentId,
+        }),
+      ),
+    )
+    if (res instanceof Error) return res
 
     const data = res.data.data ?? ''
     // Convert base64url to standard base64
@@ -2031,7 +2061,7 @@ export class GmailClient {
     const results: AttachmentMeta[] = []
 
     for (const part of parts) {
-      if (part.filename && part.filename.length > 0 && part.body?.attachmentId) {
+      if (part.filename && part.filename.length > 0 && part.body?.attachmentId && part.partId) {
         const disposition =
           part.headers?.find((h) => h.name?.toLowerCase() === 'content-disposition')?.value ?? ''
         const hasContentId = part.headers?.some((h) => h.name?.toLowerCase() === 'content-id')
@@ -2039,7 +2069,8 @@ export class GmailClient {
 
         if (!isInline || !hasContentId) {
           results.push({
-            attachmentId: part.body.attachmentId,
+            // Stable MIME part ID; part.body.attachmentId changes on every fetch.
+            attachmentId: part.partId,
             filename: part.filename,
             mimeType: part.mimeType ?? 'application/octet-stream',
             size: Number(part.body.size ?? 0),
