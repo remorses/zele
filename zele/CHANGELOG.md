@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.11.0
+
+1. **Drafts with attachments** — `draft create` and `draft update` accept repeatable `--attach <file>`, like `mail send`:
+
+   ```bash
+   zele draft create --to bob@example.com --subject "Report" --body "Attached" --attach report.pdf --attach logo.png
+   zele draft update <draft-id> --attach extra.pdf  # adds a file, keeps existing ones
+   ```
+
+   `draft update` keeps the attachments the draft already has. Before, any update dropped them. On IMAP, drafts keep their attachments when created, updated and sent, and a failed update no longer loses the draft.
+
+2. **Replies mark the thread as read** — `mail reply` (with or without `--all`), `mail send --thread-id` and TUI replies mark the thread read after sending, on Gmail and IMAP. If marking read fails, zele prints a warning but still reports the reply as sent.
+
+3. **`mail read` shows each message's ID** — so a `mail watch` match can be checked against the thread. `--verify` also shows `Message-ID`, `In-Reply-To` and `References`.
+
+4. **Fixed `attachment get`** — on Gmail, files save with their real filename and already downloaded files are skipped. Attachment IDs are now stable MIME part IDs (like `1` or `0.2`) instead of Gmail IDs that change on every fetch. On IMAP, it saves the real file instead of base64 text, and `.txt` or `.html` attachments are no longer shown as the message body.
+
+5. **Fixed `mail watch` on Gmail returning an old message right after start** — watch now reads a live history cursor instead of a cached profile, also when the cursor expires.
+
 ## 0.10.0
 
 1. **Free, permanent `@zele.sh` email addresses** (receive-only for now). Sign in with a @gmail.com owner and create up to 10 addresses for yourself, a project, or your agents:
