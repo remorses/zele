@@ -200,6 +200,9 @@ export interface SentInThread<M> {
   cc: string[]
   bcc: string[]
   recipientSource: ReplyRecipientSource
+  /** Set when the message was sent but marking the thread read failed.
+   *  Sending a reply marks the thread read; drafts never do. */
+  markReadError?: Error
 }
 
 /** Prefix a subject with "Re:" unless it already has one (case-insensitive). */

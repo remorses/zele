@@ -881,12 +881,17 @@ export class ImapSmtpClient {
     })
     if (result instanceof Error) return result
 
+    // Replying means the thread was read. A failure here must not fail the
+    // send, or callers would retry and send the reply twice.
+    const markRead = await this.markAsRead({ threadIds: [threadId] })
+
     return {
       message: result,
       to: envelope.to.map((r) => r.email),
       cc: (envelope.cc ?? []).map((r) => r.email),
       bcc: (bcc ?? []).map((r) => r.email),
       recipientSource: envelope.source,
+      markReadError: markRead instanceof Error ? markRead : undefined,
     }
   }
 

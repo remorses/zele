@@ -976,6 +976,9 @@ export class GmailClient {
     })
     if (result instanceof Error) return result
 
+    // Replying means the thread was read. A failure here must not fail the
+    // send, or callers would retry and send the reply twice.
+    const markRead = await this.markAsRead({ threadIds: [threadId] })
     await this.invalidateThread(threadId)
 
     return {
@@ -984,6 +987,7 @@ export class GmailClient {
       cc: (envelope.cc ?? []).map((r) => r.email),
       bcc: (bcc ?? []).map((r) => r.email),
       recipientSource: envelope.source,
+      markReadError: markRead instanceof Error ? markRead : undefined,
     }
   }
 

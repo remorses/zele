@@ -572,6 +572,9 @@ export function registerMailCommands(cli: ZeleCli) {
           seenMessageId,
         })
         if (result instanceof Error) handleCommandError(result)
+        if (result.markReadError) {
+          console.warn('Sent, but failed to mark the thread as read:', result.markReadError.message)
+        }
         if (accountType === 'google' && result.message.id) {
           const marked = await setThreadSeenMessageId({
             email,
@@ -746,6 +749,9 @@ export function registerMailCommands(cli: ZeleCli) {
         seenMessageId,
       })
       if (result instanceof Error) handleCommandError(result)
+      if (result.markReadError) {
+        console.warn('Sent, but failed to mark the thread as read:', result.markReadError.message)
+      }
       if (accountType === 'google' && result.message.id) {
         const marked = await setThreadSeenMessageId({
           email: accountEmail,

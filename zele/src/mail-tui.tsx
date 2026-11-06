@@ -483,7 +483,11 @@ Name`
       return
     }
 
-    await showToast({ style: Toast.Style.Success, title: `Reply sent to ${result.to.join(', ')}` })
+    if (result.markReadError) {
+      await showFailureToast(result.markReadError, { title: 'Reply sent, but failed to mark thread read' })
+    } else {
+      await showToast({ style: Toast.Style.Success, title: `Reply sent to ${result.to.join(', ')}` })
+    }
     onSent?.()
     pop()
   }
