@@ -515,6 +515,9 @@ export class ImapSmtpClient {
     maxResults?: number
     labelIds?: string[]
     pageToken?: string
+    /** Accepted for parity with GmailClient: IMAP keeps no local thread
+     *  cache (see the cache stubs below), so there is nothing to skip. */
+    noCache?: boolean
   } = {}): Promise<ThreadListResult | AuthError | ApiError> {
     const lowerFolder = folder?.toLowerCase()
     const isStarred = lowerFolder === 'starred'
@@ -604,6 +607,8 @@ export class ImapSmtpClient {
   }: {
     threadId: string
     skipCache?: boolean
+    /** Accepted for parity with GmailClient: IMAP keeps no local thread cache. */
+    noCache?: boolean
   }): Promise<ThreadResult | NotFoundError | AuthError | ApiError> {
     const { folder, uid } = parseThreadId(threadId)
 
@@ -703,6 +708,9 @@ export class ImapSmtpClient {
     references?: string
     attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
     fromEmail?: string
+    /** Accepted for parity with GmailClient: SMTP sends are already a
+     *  single attempt — this client never retries a send. */
+    singleAttempt?: boolean
   }): Promise<{ id: string; threadId: string; labelIds: string[] } | UnsupportedError | AuthError | ApiError> {
     const transporter = await this.getSmtpTransporter()
     if (transporter instanceof Error) return transporter
@@ -865,6 +873,8 @@ export class ImapSmtpClient {
     fromEmail?: string
     attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
     seenMessageId?: string | null
+    /** Accepted for parity with GmailClient: SMTP sends are already single-attempt. */
+    singleAttempt?: boolean
   }): Promise<EmptyThreadError | SelfRecipientError | AmbiguousRecipientError | UnseenLatestError | NotFoundError | UnsupportedError | AuthError | ApiError | SentInThread<{ id: string; threadId: string; labelIds: string[] }>> {
     const envelope = await this.resolveThreadReply({ threadId, to, cc, replyAll, allowSelf, seenMessageId })
     if (envelope instanceof Error) return envelope
