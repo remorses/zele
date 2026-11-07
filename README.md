@@ -142,8 +142,11 @@ zele mail list --filter "is:unread" --limit 100   # list unread inbox threads
 zele mail list --folder sent --limit 100          # list sent mail
 zele mail list --filter "is:unread" --limit 100 | yq '.[].id' | xargs zele mail read  # read all unread
 zele mail search "from:github" --limit 100        # search with Gmail query syntax
+zele mail list --no-cache                         # list without reading or writing the local thread cache
 zele mail read <thread-id>                        # read a thread
+zele mail read <thread-id> --no-cache             # read without writing the thread to the local cache
 zele mail send                                    # send an email
+zele mail send --single-attempt                   # send exactly once: no retry, so a failed send cannot duplicate
 zele mail send --thread-id <thread-id>            # send into an existing thread
 zele mail reply <thread-id>                       # reply to a thread (must mail read first)
 zele mail reply <thread-id> --dry-run             # show who the reply would go to
