@@ -16,6 +16,7 @@ import {
   threadMatchesListQuery,
 } from './gmail-client.js'
 import { mailboxIsSent } from './imap-smtp-client.js'
+import { withRetry } from './api-utils.js'
 import { formatFlags } from './output.js'
 
 const auth = new OAuth2Client()
@@ -553,5 +554,94 @@ describe('threadMatchesListQuery', () => {
 
   test('OR queries are not AND-filtered client-side', () => {
     expect(threadMatchesListQuery(readSent, 'is:unread OR is:starred')).toBe(true)
+  })
+})
+
+describe('opt-in single-attempt send and no-cache reads', () => {
+  const account = { email: 'owner@example.com', appId: 'test-app', accountType: 'google', capabilities: [] } as any
+
+  function rateLimitError() {
+    return Object.assign(new Error('Quota exceeded'), { code: 429 })
+  }
+
+  test('withRetry with maxAttempts 1 calls the function exactly once', async () => {
+    const fn = vi.fn(async () => {
+      throw rateLimitError()
+    })
+    await expect(withRetry(fn, 1)).rejects.toThrow('Quota exceeded')
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  test('withRetry still uses the full attempt budget when allowed', async () => {
+    const fn = vi.fn(async () => {
+      throw rateLimitError()
+    })
+    await expect(withRetry(fn, 3, 1)).rejects.toThrow('Quota exceeded')
+    expect(fn).toHaveBeenCalledTimes(3)
+  })
+
+  test('sendMessage with singleAttempt makes exactly one send request on a retryable failure', async () => {
+    const c = new GmailClient({ auth: new OAuth2Client(), account })
+    const send = vi.fn(async () => {
+      throw rateLimitError()
+    })
+    ;(c as any).gmail = { users: { messages: { send } } }
+
+    const result = await c.sendMessage({
+      to: [{ email: 'friend@example.com' }],
+      subject: 'Hi',
+      body: 'Hello',
+      singleAttempt: true,
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  test('getThread with noCache neither reads nor writes the thread cache', async () => {
+    const c = new GmailClient({ auth: new OAuth2Client(), account })
+    const rawThread = listThread([{ from: 'A <a@example.com>', to: 'owner@example.com', labels: ['INBOX'] }])
+    const getCached = vi.spyOn(c as any, 'getCachedThread').mockResolvedValue(undefined)
+    const putCache = vi.spyOn(c as any, 'cacheThreadData').mockResolvedValue(undefined)
+    ;(c as any).gmail = { users: { threads: { get: vi.fn(async () => ({ data: rawThread })) } } }
+
+    const fresh = await c.getThread({ threadId: 'thread_list', noCache: true })
+    expect(fresh).not.toBeInstanceOf(Error)
+    expect(getCached).not.toHaveBeenCalled()
+    expect(putCache).not.toHaveBeenCalled()
+
+    const normal = await c.getThread({ threadId: 'thread_list' })
+    expect(normal).not.toBeInstanceOf(Error)
+    expect(getCached).toHaveBeenCalledTimes(1)
+    expect(putCache).toHaveBeenCalledTimes(1)
+  })
+
+  test('listThreads with noCache ignores a fresh cache entry and does not write back', async () => {
+    const c = new GmailClient({ auth: new OAuth2Client(), account })
+    const rawThread = { ...listThread([{ from: 'A <a@example.com>', to: 'owner@example.com', labels: ['INBOX'] }]), historyId: 'h2' }
+    const getCached = vi.spyOn(c as any, 'getCachedThread').mockResolvedValue(rawThread)
+    const putCache = vi.spyOn(c as any, 'cacheThreadData').mockResolvedValue(undefined)
+    const threadsGet = vi.fn(async () => ({ data: rawThread }))
+    ;(c as any).gmail = {
+      users: {
+        threads: {
+          list: vi.fn(async () => ({ data: { threads: [{ id: 'thread_list', historyId: 'h2' }] } })),
+          get: threadsGet,
+        },
+      },
+    }
+
+    // Default: the cache entry matches the list historyId, so no fetch happens.
+    const cachedResult = await c.listThreads({ maxResults: 5 })
+    expect(cachedResult).not.toBeInstanceOf(Error)
+    expect(threadsGet).not.toHaveBeenCalled()
+
+    // noCache: the cache is bypassed, the thread is fetched live, and the
+    // fetched copy is not written back.
+    const freshResult = await c.listThreads({ maxResults: 5, noCache: true })
+    expect(freshResult).not.toBeInstanceOf(Error)
+    expect(threadsGet).toHaveBeenCalledTimes(1)
+    expect(getCached).toHaveBeenCalledTimes(1) // only from the default call above
+    expect(putCache).not.toHaveBeenCalled()
   })
 })

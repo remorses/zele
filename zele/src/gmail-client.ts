@@ -613,12 +613,16 @@ export class GmailClient {
     maxResults = 25,
     labelIds,
     pageToken,
+    noCache = false,
   }: {
     query?: string
     folder?: string
     maxResults?: number
     labelIds?: string[]
     pageToken?: string
+    /** Skip the local thread cache entirely for this call: hydration neither
+     *  reads cached threads nor writes fetched ones. Authentication is unaffected. */
+    noCache?: boolean
   } = {}): Promise<ThreadListResult | AuthError | ApiError> {
     const { q, resolvedLabelIds } = buildGmailSearchParams({ folder, query, labelIds })
 
@@ -646,7 +650,7 @@ export class GmailClient {
       const hydrated = await mapConcurrent(pageThreads, async (t) => {
         if (!t.id) return null
 
-        const cached = await this.getCachedThread(t.id)
+        const cached = noCache ? undefined : await this.getCachedThread(t.id)
         if (cached && t.historyId && cached.historyId && t.historyId === cached.historyId) {
           return { parsed: this.parseThreadListItem(cached), raw: cached }
         }
@@ -664,7 +668,7 @@ export class GmailClient {
         if (detail instanceof Error) return null
 
         const parsed = this.parseThread(detail.data)
-        await this.cacheThreadData(t.id, detail.data, parsed)
+        if (!noCache) await this.cacheThreadData(t.id, detail.data, parsed)
 
         return {
           parsed: this.parseThreadListItem(detail.data),
@@ -709,14 +713,18 @@ export class GmailClient {
   async getThread({
     threadId,
     skipCache = false,
+    noCache = false,
   }: {
     threadId: string
     // mail read and reply seen-checks must skip cache. A stale cached last
     // message would be recorded as seen, then a live reply fetch would never
     // match, and the agent would loop on mail read.
     skipCache?: boolean
+    /** Skip cache writes too: the fetched thread is not persisted locally.
+     *  Implies the cache is not read either. */
+    noCache?: boolean
   }): Promise<ThreadResult | AuthError | ApiError> {
-    if (!skipCache) {
+    if (!skipCache && !noCache) {
       const cached = await this.getCachedThread(threadId)
       if (cached) {
         return { parsed: this.parseThread(cached), raw: cached }
@@ -737,8 +745,9 @@ export class GmailClient {
     const parsed = this.parseThread(res.data)
     const result: ThreadResult = { parsed, raw: res.data }
 
-    // Write cache
-    await this.cacheThreadData(threadId, res.data, parsed)
+    // Write cache (suppressed by noCache: the caller asked for this fetch to
+    // leave no local copy of the thread's headers or body)
+    if (!noCache) await this.cacheThreadData(threadId, res.data, parsed)
 
     return result
   }
@@ -802,6 +811,7 @@ export class GmailClient {
     references,
     attachments,
     fromEmail,
+    singleAttempt = false,
   }: {
     to: Array<{ name?: string; email: string }>
     subject: string
@@ -813,6 +823,10 @@ export class GmailClient {
     references?: string
     attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
     fromEmail?: string
+    /** Make exactly one send request: no retry after an ambiguous failure,
+     *  so a request the server accepted but reported as failed cannot
+     *  duplicate the message. */
+    singleAttempt?: boolean
   }) {
     const raw = buildGmailMimeMessage({
       to,
@@ -827,14 +841,16 @@ export class GmailClient {
     })
 
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
-      withRetry(() =>
-        this.gmail.users.messages.send({
-          userId: 'me',
-          requestBody: {
-            raw,
-            threadId,
-          },
-        }),
+      withRetry(
+        () =>
+          this.gmail.users.messages.send({
+            userId: 'me',
+            requestBody: {
+              raw,
+              threadId,
+            },
+          }),
+        singleAttempt ? 1 : 10,
       ),
     )
     if (res instanceof Error) return res
@@ -946,6 +962,7 @@ export class GmailClient {
     fromEmail,
     attachments,
     seenMessageId,
+    singleAttempt = false,
   }: {
     threadId: string
     body: string
@@ -958,6 +975,8 @@ export class GmailClient {
     fromEmail?: string
     attachments?: Array<{ filename: string; mimeType: string; content: Buffer }>
     seenMessageId?: string | null
+    /** Forwarded to sendMessage: exactly one send request, no retry. */
+    singleAttempt?: boolean
   }): Promise<EmptyThreadError | SelfRecipientError | AmbiguousRecipientError | UnseenLatestError | AuthError | ApiError | SentInThread<gmail_v1.Schema$Message>> {
     const envelope = await this.resolveThreadReply({ threadId, to, cc, replyAll, allowSelf, seenMessageId })
     if (envelope instanceof Error) return envelope
@@ -973,6 +992,7 @@ export class GmailClient {
       references: envelope.references,
       fromEmail,
       attachments,
+      singleAttempt,
     })
     if (result instanceof Error) return result
 
