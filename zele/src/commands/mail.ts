@@ -125,6 +125,7 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
     .option('--label <label>', 'Filter by label name')
     .option('--filter <filter>', 'Gmail search filter (e.g. "is:unread", "from:github", "has:attachment")')
+    .option('--no-cache', 'Skip the local thread cache entirely: do not read or write cached threads')
     .action(async (options) => {
       // `options.folder` / `options.limit` are `string | undefined` now.
       // `''` (bare flag) falls back to the default via `||`.
@@ -160,6 +161,7 @@ export function registerMailCommands(cli: ZeleCli) {
             labelIds,
             pageToken: options.page,
             query: options.filter,
+            noCache: options.noCache || undefined,
           })
           if (result instanceof Error) return result
 
@@ -243,6 +245,7 @@ export function registerMailCommands(cli: ZeleCli) {
     .command('mail search <query>', 'Search email threads using Gmail query syntax (from:, to:, subject:, has:attachment, etc). See https://support.google.com/mail/answer/7190')
     .option('--limit [limit]', 'Max results to show (default: 20)')
     .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
+    .option('--no-cache', 'Skip the local thread cache entirely: do not read or write cached threads')
     .action(async (query, options) => {
       const limit = options.limit ? Number(options.limit) : 20
       const clients = await getClients(options.account)
@@ -259,6 +262,7 @@ export function registerMailCommands(cli: ZeleCli) {
             query,
             maxResults: limit,
             pageToken: options.page,
+            noCache: options.noCache || undefined,
           })
           if (result instanceof Error) return result
 
@@ -333,6 +337,7 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--raw', 'Show raw message (first message only, single thread)')
     .option('--raw-html', 'Show raw HTML body per message (no markdown conversion)')
     .option('--verify', 'Show expanded authentication details (SPF/DKIM/DMARC) and threading headers')
+    .option('--no-cache', 'Do not write the fetched thread to the local cache (reads already skip the cache)')
     .action(async (threadIds, options) => {
       if (threadIds.length === 0) {
         out.error('No thread IDs provided')
@@ -351,7 +356,7 @@ export function registerMailCommands(cli: ZeleCli) {
           out.error('--raw only supports a single thread ID')
           process.exit(1)
         }
-        const threadResult = await client.getThread({ threadId: threadIds[0]!, skipCache: true })
+        const threadResult = await client.getThread({ threadId: threadIds[0]!, skipCache: true, noCache: options.noCache || undefined })
         if (threadResult instanceof Error) handleCommandError(threadResult)
         const thread = threadResult.parsed
         if (thread.messages.length === 0) {
@@ -369,7 +374,7 @@ export function registerMailCommands(cli: ZeleCli) {
       // can still reject. Keep each read isolated so one failure cannot abort
       // a multi-thread command.
       const settled = await Promise.allSettled(
-        threadIds.map((id) => client.getThread({ threadId: id, skipCache: true })),
+        threadIds.map((id) => client.getThread({ threadId: id, skipCache: true, noCache: options.noCache || undefined })),
       )
 
       const w = Math.min(process.stdout.columns || 72, 72)
@@ -511,6 +516,7 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--from <from>', z.string().describe('Send-as alias email'))
     .option('--attach <attach>', z.array(z.string()).describe('File to attach (repeatable: --attach a.pdf --attach b.png)'))
     .option('--force', 'With --thread-id: send even if the latest message was not read')
+    .option('--single-attempt', 'Make exactly one send request: no retry after an ambiguous failure, so the message cannot be duplicated')
     .action(async (options) => {
       // With --thread-id both --to and --subject are inferred from the thread.
       if (!options.to && !options.threadId) {
@@ -570,6 +576,7 @@ export function registerMailCommands(cli: ZeleCli) {
           fromEmail: options.from,
           attachments,
           seenMessageId,
+          singleAttempt: options.singleAttempt || undefined,
         })
         if (result instanceof Error) handleCommandError(result)
         if (result.markReadError) {
@@ -617,6 +624,7 @@ export function registerMailCommands(cli: ZeleCli) {
         bcc,
         fromEmail: options.from,
         attachments,
+        singleAttempt: options.singleAttempt || undefined,
       })
       if (result instanceof Error) handleCommandError(result)
 
@@ -644,6 +652,7 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--draft', 'Save as draft instead of sending')
     .option('--dry-run', 'Print the resolved recipients and headers without sending')
     .option('--force', 'Reply even if the latest message was not read')
+    .option('--single-attempt', 'Make exactly one send request: no retry after an ambiguous failure, so the reply cannot be duplicated')
     .action(async (threadId, options) => {
       // --dry-run answers "who would this reply go to?" before committing to send.
       if (options.dryRun) {
@@ -747,6 +756,7 @@ export function registerMailCommands(cli: ZeleCli) {
         fromEmail: options.from,
         attachments,
         seenMessageId,
+        singleAttempt: options.singleAttempt || undefined,
       })
       if (result instanceof Error) handleCommandError(result)
       if (result.markReadError) {
