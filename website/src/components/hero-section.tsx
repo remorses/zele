@@ -34,8 +34,6 @@ function HeroBackground() {
         enableMask={false}
         fadeTop={false}
         fadeBottom={false}
-        fluidStrength={0.15}
-        fluidCurl={80}
       />
     </div>
   )
