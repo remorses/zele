@@ -835,6 +835,7 @@ export class GmailClient {
             threadId,
           },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
@@ -1071,6 +1072,7 @@ export class GmailClient {
             message: { raw, threadId },
           },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
@@ -1164,6 +1166,7 @@ export class GmailClient {
         userId: 'me',
         requestBody: { id: draftId },
       }),
+      { idempotent: false },
     )
 
     return res.data
@@ -1272,6 +1275,7 @@ export class GmailClient {
             message: { raw, threadId },
           },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
@@ -1339,6 +1343,7 @@ export class GmailClient {
             message: { raw, threadId },
           },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
@@ -1577,6 +1582,7 @@ export class GmailClient {
           color,
         },
       }),
+      { idempotent: false },
     )
 
     await this.invalidateLabels()
@@ -1651,6 +1657,7 @@ export class GmailClient {
           userId: 'me',
           requestBody: { criteria, action },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
