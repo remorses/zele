@@ -79,6 +79,7 @@ export interface CalendarEvent {
   url?: string
   etag?: string
   uid?: string
+  ics?: string // raw iCalendar object, patched in place by respondToEvent
 }
 
 export interface CalendarAttendee {
@@ -229,7 +230,24 @@ function icsEventToCalendarEvent(event: IcsEvent, calObj?: DAVCalendarObject): C
     url: calObj?.url,
     etag: calObj?.etag,
     uid: event.uid,
+    ics: calObj?.data,
   }
+}
+
+/** Set PARTSTAT on the ATTENDEE lines for `email`, leaving the rest of the object untouched */
+function setOwnPartstat(ics: string, email: string, partstat: string): string {
+  const mailto = `mailto:${email.toLowerCase()}`
+  return ics
+    .replace(/\r?\n[ \t]/g, '') // unfold
+    .split(/\r?\n/)
+    .map((line) => {
+      if (!/^ATTENDEE[;:]/i.test(line)) return line
+      const i = line.search(/:mailto:/i)
+      if (i < 0 || line.slice(i + 1).toLowerCase() !== mailto) return line
+      const params = line.slice(0, i).split(';').filter((p) => !/^(PARTSTAT|RSVP)=/i.test(p))
+      return [...params, `PARTSTAT=${partstat}`].join(';') + line.slice(i)
+    })
+    .join('\r\n')
 }
 
 /** Parse all events from a raw iCal data string using ts-ics.
@@ -802,30 +820,13 @@ export class CalendarClient {
       return new MissingDataError({ what: 'CalDAV URL or etag', resource: `event ${eventId}` })
     }
 
-    // Update our PARTSTAT in attendees
-    const attendees = existing.attendees.map((a) => ({
-      email: a.email,
-      name: a.name ?? undefined,
-      partstat: a.email.toLowerCase() === this.email.toLowerCase()
-        ? status.toUpperCase()
-        : (a.status === 'needsAction' ? 'NEEDS-ACTION' : a.status.toUpperCase()),
-    }))
-
-    const organizer = existing.attendees.find((a) => a.organizer)
-
-    const iCalString = buildICalString({
-      uid: existing.uid ?? eventId,
-      summary: existing.summary,
-      start: existing.start,
-      end: existing.end,
-      allDay: existing.allDay,
-      description: existing.description || undefined,
-      location: existing.location || undefined,
-      attendees,
-      organizer: organizer
-        ? { email: organizer.email, name: organizer.name ?? undefined }
-        : { email: this.email },
-    })
+    // Patch only our PARTSTAT in the stored object: rebuilding it would drop the organizer,
+    // and Google ignores attendee replies that change the organizer
+    const isAttendee = existing.attendees.some((a) => a.email.toLowerCase() === this.email.toLowerCase())
+    if (!existing.ics || !isAttendee) {
+      return new MissingDataError({ what: 'invitation for this account', resource: `event ${eventId}` })
+    }
+    const iCalString = setOwnPartstat(existing.ics, this.email, status.toUpperCase())
 
     const respondResult = await caldavBoundary(this.email, () =>
       updateCalendarObject({
