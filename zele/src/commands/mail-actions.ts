@@ -158,7 +158,7 @@ export function registerMailActionCommands(cli: ZeleCli) {
       const then = options.then ?? 'nothing'
 
       const { client } = await getClient(options.account)
-      const threadResult = await client.getThread({ threadId })
+      const threadResult = await client.getThread({ threadId, headersOnly: true })
       if (threadResult instanceof Error) handleCommandError(threadResult)
       const thread = threadResult.parsed
 

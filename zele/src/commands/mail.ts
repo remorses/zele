@@ -351,7 +351,7 @@ export function registerMailCommands(cli: ZeleCli) {
           out.error('--raw only supports a single thread ID')
           process.exit(1)
         }
-        const threadResult = await client.getThread({ threadId: threadIds[0]!, skipCache: true })
+        const threadResult = await client.getThread({ threadId: threadIds[0]!, skipCache: true, headersOnly: true })
         if (threadResult instanceof Error) handleCommandError(threadResult)
         const thread = threadResult.parsed
         if (thread.messages.length === 0) {

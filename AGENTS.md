@@ -6,6 +6,7 @@ the TUI (the root command) is only supported in bun. our bin file tries to use b
 
 - `zele/src/cli.ts` registers command modules; commands own CLI input/output.
 - Mail clients (`gmail-client.ts`, `imap-smtp-client.ts`) own provider API calls, caching and watch cursors. Gmail watch reads a live history cursor, never the 24-hour profile cache.
+- Gmail quota: new Google projects get 6,000 units per minute per user (threads.get full costs 120, metadata 40). `GmailClient.fetchThread` reuses cached message payloads (they never change) and fetches only metadata plus new messages. Invalidation keeps rows and clears historyId. Label changes use `threads.modify` (10 units). See https://developers.google.com/workspace/gmail/api/reference/quota
 - `zele/src/db.ts` owns the SQLite connection; `schema.ts` and `schema.sql` define storage.
 - Root `README.md` and `skills/zele/SKILL.md` are the source docs. Copies in `zele/` are generated.
 - `mail watch` only waits and prints a candidate. Backgrounding, reply validation and send approval are the agent's job (see the skill).
