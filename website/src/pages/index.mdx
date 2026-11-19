@@ -6,7 +6,8 @@ description: "zele is a multi-account email and calendar CLI for Gmail, Outlook,
 icon: lucide:home
 prompt: |
   Homepage for the zele docs site. Hero from @/website/src/components/hero-section.tsx,
-  body imported from @/README.md.
+  body imported from @/README.md. End with a short privacy section that explains
+  why zele requests Google data and links the privacy policy and terms.
 ---
 
 import { HeroSection } from '../components/hero-section.tsx'
@@ -19,3 +20,9 @@ import Readme from '../../../README.md'
 </Above>
 
 <Readme />
+
+## Privacy and your Google data
+
+zele is a **local client**. It asks Google for access to Gmail, Google Calendar and your email address so you can read, search, send and organize mail and manage events from your terminal. All Google data goes **directly between your computer and Google**, and tokens and cached mail stay in `~/.zele/sqlite.db` on your machine. zele never sends your Google data to its own servers, never sells it, and never uses it to train AI models.
+
+Read the [privacy policy](./privacy.mdx) and the [terms of service](./terms.mdx).

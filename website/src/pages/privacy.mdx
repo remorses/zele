@@ -1,0 +1,140 @@
+---
+$schema: https://holocron.so/frontmatter.json
+title: "Privacy policy"
+sidebarTitle: Privacy
+description: "How zele accesses, uses, stores, shares and deletes Google user data and @zele.sh mail. zele is a local CLI: Google data never reaches our servers."
+icon: lucide:shield-check
+prompt: |
+  Privacy policy for Google OAuth verification of zele. Describe the local CLI
+  from @/zele/src/auth.ts (scopes), @/zele/src/schema.sql (local storage),
+  @/zele/src/commands/inbox.ts (zele.sh sign-in code read from Gmail), and the
+  @zele.sh service from @/website/src/receive-mail.ts, @/website/src/api.ts,
+  @/website/src/db.ts, @/website/src/inbox-store.ts, @/website/src/email-rules.ts.
+  Include the Limited Use disclosure from
+  @https://developers.google.com/terms/api-services-user-data-policy
+---
+
+**Effective date:** November 19, 2026
+
+zele is an **email and calendar client that runs on your computer**. When you connect a Google account, zele talks to Google directly from your machine. Your Gmail and Google Calendar data **never passes through and is never stored on zele servers**.
+
+zele also offers an optional **@zele.sh** address service, which does run on our server. It is described separately in [The @zele.sh address service](#the-zelesh-address-service). It does not receive your Google data.
+
+## Who we are
+
+zele is open-source software made by **Tommaso De Rossi**. The source code is public at [github.com/remorses/zele](https://github.com/remorses/zele), so you can check every claim in this policy.
+
+For privacy questions or deletion requests, email **beats.by.morse@gmail.com**.
+
+## Google user data
+
+### What zele accesses
+
+When you run `zele login`, Google asks you to allow these **scopes**:
+
+| Scope                                            | What zele does with it                                                                                                                                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `https://mail.google.com/`                       | Lists, searches, reads, sends, replies to, forwards, drafts, labels, archives, trashes and deletes your email, manages Gmail filters, and watches for new mail when you run those commands. |
+| `https://www.googleapis.com/auth/calendar`       | Lists your calendars, reads, creates, updates and deletes events, sends RSVPs and checks free/busy times when you run calendar commands.                                                    |
+| `https://www.googleapis.com/auth/userinfo.email` | Reads your email address, so zele knows which account you signed in with and can keep several accounts apart.                                                                               |
+
+zele is a **full email client**, so it needs the full Gmail scope. Commands like permanent delete and filter management are not covered by narrower scopes.
+
+### How zele uses it
+
+zele uses Google user data **only to provide the features you run** in the CLI and terminal UI: showing your mail and events, and performing the actions you ask for.
+
+- zele does **not** use Google user data for advertising.
+- zele does **not** sell Google user data.
+- zele does **not** use Google user data to develop, improve or train generalized AI or machine learning models.
+- **No person** at zele reads your Google user data. We never receive it.
+
+### Where it is stored
+
+zele stores data **only on your computer**, in the SQLite file `~/.zele/sqlite.db`:
+
+- your **OAuth tokens** (access and refresh token) for each account
+- a **cache** of threads, labels, profile and calendar list, so commands are fast
+- **sync cursors**, such as the Gmail history ID used by `zele mail watch`
+- which message you last read in each thread
+
+Cached entries expire and are fetched again from Google. Nothing in this file is uploaded anywhere. The file is protected by your operating system user account, like other files in your home folder.
+
+### Sharing and transfers
+
+We do not receive your Google user data, so **we do not share it** with anyone. Data only leaves your computer in these cases, and only when you start them:
+
+- **Requests to Google.** Every Gmail and Calendar command calls Google APIs directly.
+- **Actions you ask for.** When you send, reply or forward, the message goes to the recipients you choose. When you unsubscribe from a mailing list, zele contacts the unsubscribe address or URL that the sender put in the message.
+- **Your AI agent.** zele prints results to your terminal. If you run zele inside an AI agent or script, that tool receives the output under its own terms. zele does not send data to any AI provider itself.
+- **zele.sh sign-in.** If you run `zele login zele` with a Gmail account that is already connected, zele searches that Gmail account for the sign-in code email from `noreply@zele.sh`. It sends **only your Gmail address and that code** to zele.sh to sign you in. No other Gmail content is sent.
+
+### Deleting your data
+
+- `zele logout <email>` deletes the tokens and all cached data for that account from `~/.zele/sqlite.db`.
+- Deleting the `~/.zele` folder removes everything zele stored.
+- To revoke zele's access, open [Google Account permissions](https://myaccount.google.com/permissions) and remove zele.
+
+### Limited Use disclosure
+
+zele's use and transfer to any other app of information received from Google APIs will adhere to the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the **Limited Use** requirements.
+
+zele does not use Google Workspace API data to develop, improve or train generalized AI and/or ML models.
+
+## Other email accounts
+
+Microsoft and IMAP/SMTP accounts work the **same local way**. zele talks to Microsoft or your mail provider directly. Tokens, passwords and cached mail stay in `~/.zele/sqlite.db` on your computer.
+
+## The @zele.sh address service
+
+The @zele.sh service is **optional**. It gives you permanent, **receive-only** addresses like `you@zele.sh`. Unlike the rest of zele, it runs on our server, because mail sent to your address must arrive somewhere while your computer is off.
+
+Mail sent to a @zele.sh address comes from the sender's mail server. It is **not Google user data**, and it is never combined with your Google data.
+
+### What we store
+
+| Data                     | Why                                                                                                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Your owner Gmail address | Identifies your account. Only `@gmail.com` addresses can own inboxes, to block spam bots.                                                                    |
+| Sign-in codes            | Sent to your Gmail to sign you in. They expire after 10 minutes.                                                                                             |
+| Sessions                 | Keep the CLI signed in. Each session stores a token, IP address, user agent and dates.                                                                       |
+| Your inbox names         | Route mail to the right owner. You can have up to 10 inboxes.                                                                                                |
+| Received mail            | The raw message (compressed), plus sender, recipients, subject, a short text snippet and flags such as unread or starred, so the CLI can list and search it. |
+
+Each account can store up to **1 GB** of mail. When the limit is reached, new mail is rejected.
+
+### Where it is stored
+
+The service runs on **Cloudflare** (Workers, D1, Durable Objects, R2 and Email Routing). Cloudflare processes this data for us as a hosting provider. Request logs and traces are kept by Cloudflare for debugging.
+
+We do not use @zele.sh mail for advertising, we do not sell it, and we do not use it to train AI models. We only read it when needed to fix a bug or handle abuse, or when the law requires it.
+
+### Retention and deletion
+
+- Mail stays until you delete it. Mail in trash is **permanently deleted after 30 days**.
+- `zele inbox delete <address>` permanently deletes that inbox and all of its mail. The address name stays reserved, so nobody else can receive your mail later.
+- To delete your whole zele.sh account, email **beats.by.morse@gmail.com** from your owner Gmail address. We delete your account, sessions, inboxes and mail.
+
+### Sending
+
+The @zele.sh service **does not send mail** for users. The only mail it sends is the sign-in code to your Gmail address.
+
+## Website
+
+The zele.sh website has **no ads and no analytics trackers**. It does not set advertising or tracking cookies.
+
+## Security
+
+zele uses HTTPS for every connection to Google, Microsoft and zele.sh. On your computer, protect `~/.zele/sqlite.db` like your other private files: anyone with access to your user account can read it.
+
+## Children
+
+zele is **not for children under 13**. We do not knowingly collect data from children.
+
+## Changes
+
+If this policy changes, we update this page and the effective date. Important changes are also noted in the [release notes](https://github.com/remorses/zele/releases).
+
+## Contact
+
+Email **beats.by.morse@gmail.com** with any question about this policy. See also the [terms of service](./terms.mdx).

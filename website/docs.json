@@ -18,6 +18,11 @@
         "group": "Getting Started",
         "icon": "lucide:rocket",
         "pages": ["index"]
+      },
+      {
+        "group": "Legal",
+        "hidden": true,
+        "pages": ["privacy", "terms"]
       }
     ],
     "global": {
@@ -30,6 +35,15 @@
   "footer": {
     "socials": {
       "github": "https://github.com/remorses/zele"
-    }
+    },
+    "links": [
+      {
+        "header": "Legal",
+        "items": [
+          { "label": "Privacy policy", "href": "/privacy" },
+          { "label": "Terms of service", "href": "/terms" }
+        ]
+      }
+    ]
   }
 }
