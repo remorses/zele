@@ -10,8 +10,7 @@ import * as clack from '@clack/prompts'
 import { getCalendarClients, getCalendarClient } from '../auth.js'
 import type { CalendarClient, CalendarEvent, CalendarListItem, EventListResult } from '../calendar-client.js'
 import { AuthError } from '../api-utils.js'
-import * as out from '../output.js'
-import { handleCommandError } from '../output.js'
+import { createOutput, formatEventTime, type Output } from '../output.js'
 import { resolveTimeRange, parseTimeExpression, parseDuration, isDateOnly } from '../calendar-time.js'
 
 // ---------------------------------------------------------------------------
@@ -25,7 +24,8 @@ export function registerCalendarCommands(cli: ZeleCli) {
 
   cli
     .command('cal list', 'List calendars')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const clients = await getCalendarClients(options.account)
 
       const results = await Promise.all(
@@ -80,20 +80,21 @@ export function registerCalendarCommands(cli: ZeleCli) {
     .option('--filter <filter>', 'Free text search')
     .option('--limit [limit]', 'Max results (default: 20)')
     .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const limit = options.limit ? Number(options.limit) : 20
       const calendarId = options.calendar ?? 'primary'
 
       if (options.all && options.calendar) {
         out.error('--all and --calendar cannot be used together')
-        process.exit(1)
+        out.exit(1)
       }
 
       const clients = await getCalendarClients(options.account)
 
       if (options.page && clients.length > 1) {
         out.error('--page cannot be used with multiple accounts (page tokens are per-account)')
-        process.exit(1)
+        out.exit(1)
       }
 
       const results = await Promise.all(
@@ -181,7 +182,7 @@ export function registerCalendarCommands(cli: ZeleCli) {
 
       out.printList(
         merged.map((e) => {
-          const time = out.formatEventTime(e.start, e.end, e.allDay)
+          const time = formatEventTime(e.start, e.end, e.allDay)
           return {
             ...(showAccount ? { account: e.account } : {}),
             id: e.id,
@@ -203,13 +204,14 @@ export function registerCalendarCommands(cli: ZeleCli) {
   cli
     .command('cal get <eventId>', 'Get event details')
     .option('--calendar <calendar>', 'Calendar ID (default: primary)')
-    .action(async (eventId, options) => {
+    .action(async (eventId, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const calendarId = options.calendar ?? 'primary'
       const { client } = await getCalendarClient(options.account)
 
       const event = await client.getEvent({ calendarId, eventId })
-      if (event instanceof Error) handleCommandError(event)
-      const time = out.formatEventTime(event.start, event.end, event.allDay)
+      if (event instanceof Error) out.fail(event)
+      const time = formatEventTime(event.start, event.end, event.allDay)
 
       const doc: Record<string, unknown> = {
         id: event.id,
@@ -258,24 +260,25 @@ export function registerCalendarCommands(cli: ZeleCli) {
     .option('--reminder <reminder>', 'Reminder as method:duration (e.g. popup:15m)')
     .option('--color <color>', 'Event color ID (1-11)')
     .option('--visibility <visibility>', 'Event visibility (default, public, private)')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       if (!options.summary) {
         out.error('--summary is required')
-        process.exit(1)
+        out.exit(1)
       }
       if (!options.from) {
         out.error('--from is required')
-        process.exit(1)
+        out.exit(1)
       }
       if (!options.to) {
         out.error('--to is required')
-        process.exit(1)
+        out.exit(1)
       }
 
       const calendarId = options.calendar ?? 'primary'
       const { client } = await getCalendarClient(options.account)
       const tz = await client.getTimezone(calendarId)
-      if (tz instanceof Error) handleCommandError(tz)
+      if (tz instanceof Error) out.fail(tz)
 
       const allDay = options.allDay || (isDateOnly(options.from) && isDateOnly(options.to))
       const start = allDay ? options.from : parseTimeExpression(options.from, tz)
@@ -318,8 +321,8 @@ export function registerCalendarCommands(cli: ZeleCli) {
         visibility: options.visibility,
       })
 
-      if (eventResult instanceof Error) handleCommandError(eventResult)
-      printEventDetail(eventResult)
+      if (eventResult instanceof Error) out.fail(eventResult)
+      printEventDetail(out, eventResult)
       out.success('Event created')
     })
 
@@ -340,7 +343,8 @@ export function registerCalendarCommands(cli: ZeleCli) {
     .option('--meet', 'Add Google Meet link')
     .option('--color <color>', 'Event color ID (1-11, empty to clear)')
     .option('--visibility <visibility>', 'Event visibility')
-    .action(async (eventId, options) => {
+    .action(async (eventId, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const calendarId = options.calendar ?? 'primary'
       const { client } = await getCalendarClient(options.account)
 
@@ -372,7 +376,7 @@ export function registerCalendarCommands(cli: ZeleCli) {
           }
         } else {
           const tz = await client.getTimezone(calendarId)
-          if (tz instanceof Error) handleCommandError(tz)
+          if (tz instanceof Error) out.fail(tz)
           if (options.from) start = parseTimeExpression(options.from, tz)
           if (options.to) {
             const durationMs = parseDuration(options.to)
@@ -401,8 +405,8 @@ export function registerCalendarCommands(cli: ZeleCli) {
         visibility: options.visibility,
       })
 
-      if (updateResult instanceof Error) handleCommandError(updateResult)
-      printEventDetail(updateResult)
+      if (updateResult instanceof Error) out.fail(updateResult)
+      printEventDetail(out, updateResult)
       out.success('Event updated')
     })
 
@@ -414,14 +418,15 @@ export function registerCalendarCommands(cli: ZeleCli) {
     .command('cal delete <eventId>', 'Delete a calendar event')
     .option('--calendar <calendar>', 'Calendar ID (default: primary)')
     .option('--force', 'Skip confirmation')
-    .action(async (eventId, options) => {
+    .action(async (eventId, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const calendarId = options.calendar ?? 'primary'
       const { client } = await getCalendarClient(options.account)
 
       if (!options.force) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Use --force to delete non-interactively')
-          process.exit(1)
+          out.exit(1)
         }
 
         const confirmed = await clack.confirm({
@@ -436,7 +441,7 @@ export function registerCalendarCommands(cli: ZeleCli) {
       }
 
       const deleteResult = await client.deleteEvent({ calendarId, eventId })
-      if (deleteResult instanceof Error) handleCommandError(deleteResult)
+      if (deleteResult instanceof Error) out.fail(deleteResult)
 
       out.printYaml({ deleted: true, id: eventId })
       out.success('Event deleted')
@@ -451,13 +456,14 @@ export function registerCalendarCommands(cli: ZeleCli) {
     .option('--calendar <calendar>', 'Calendar ID (default: primary)')
     .option('--status [status]', z.enum(['accepted', 'declined', 'tentative']).optional().describe('Response: accepted, declined, tentative'))
     .option('--comment <comment>', 'Optional comment')
-    .action(async (eventId, options) => {
+    .action(async (eventId, options, ctx) => {
+      const out: Output = createOutput(ctx)
       let status = options.status
 
       if (!status) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Missing --status. Usage: zele cal respond <eventId> --status accepted|declined|tentative')
-          process.exit(1)
+          out.exit(1)
         }
 
         const choice = await clack.select({
@@ -484,7 +490,7 @@ export function registerCalendarCommands(cli: ZeleCli) {
         status,
         comment: options.comment,
       })
-      if (respondResult instanceof Error) handleCommandError(respondResult)
+      if (respondResult instanceof Error) out.fail(respondResult)
 
       out.printYaml({
         id: respondResult.id,
@@ -503,19 +509,20 @@ export function registerCalendarCommands(cli: ZeleCli) {
     .command('cal freebusy [...calendarIds]', 'Get free/busy information')
     .option('--from <from>', z.string().describe('Start time'))
     .option('--to <to>', z.string().describe('End time'))
-    .action(async (calendarIds, options) => {
+    .action(async (calendarIds, options, ctx) => {
+      const out: Output = createOutput(ctx)
       if (!calendarIds || calendarIds.length === 0) {
         out.error('At least one calendar ID (email) is required')
-        process.exit(1)
+        out.exit(1)
       }
       if (!options.from || !options.to) {
         out.error('--from and --to are required')
-        process.exit(1)
+        out.exit(1)
       }
 
       const { client } = await getCalendarClient(options.account)
       const tz = await client.getTimezone()
-      if (tz instanceof Error) handleCommandError(tz)
+      if (tz instanceof Error) out.fail(tz)
 
       const timeMin = parseTimeExpression(options.from, tz)
       const timeMax = parseTimeExpression(options.to, tz)
@@ -546,8 +553,8 @@ export function registerCalendarCommands(cli: ZeleCli) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function printEventDetail(event: CalendarEvent) {
-  const time = out.formatEventTime(event.start, event.end, event.allDay)
+function printEventDetail(out: Output, event: CalendarEvent) {
+  const time = formatEventTime(event.start, event.end, event.allDay)
 
   const doc: Record<string, unknown> = {
     id: event.id,

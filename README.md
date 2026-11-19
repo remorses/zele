@@ -391,6 +391,22 @@ zele mail list --filter "is:unread" --limit 100 | yq '.[].id' | xargs zele mail 
 zele mail list --filter "is:unread" --limit 100 | yq '.[].id' | xargs zele mail archive
 ```
 
+## MCP server
+
+`zele mcp` starts an **MCP server** over stdio. Every command becomes a tool with the same options: `mail list` becomes `mail_list`, `cal events` becomes `cal_events`. The tool result is the text the CLI prints: YAML for structured output, readable text for `mail read` and `draft get`, and hints or errors in a separate text block.
+
+```bash
+# Claude Code
+claude mcp add zele -- npx -y zele mcp
+
+# Cursor; replace cursor with vscode, windsurf, opencode, claude-desktop, ...
+npx -y @playwriter/install-mcp 'npx -y zele mcp' --name zele --client cursor
+```
+
+Log in with the CLI first (`zele login`). These commands are not tools: `login`, `logout`, `completions` and `mail watch`.
+
+Every tool takes an `account` argument (a list of emails), like `--account`. Pass the email text with `body`: `bodyFile: "-"` is refused because stdin is the MCP channel.
+
 ## Shell Completions
 
 Enable Tab completion for your shell:

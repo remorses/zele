@@ -5,8 +5,7 @@ import type { ZeleCli } from '../cli-types.js'
 import { getClients } from '../auth.js'
 import { AuthError, UnsupportedError, isScopeError } from '../api-utils.js'
 import type { GmailClient } from '../gmail-client.js'
-import * as out from '../output.js'
-import { handleCommandError } from '../output.js'
+import { createOutput, type Output } from '../output.js'
 
 export function registerFilterCommands(cli: ZeleCli) {
   // =========================================================================
@@ -15,11 +14,12 @@ export function registerFilterCommands(cli: ZeleCli) {
 
   cli
     .command('mail filter list', 'List all Gmail filters')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const clients = await getClients(options.account)
       const googleClients = clients.filter((c) => c.accountType === 'google')
       if (googleClients.length === 0) {
-        handleCommandError(new UnsupportedError({ feature: 'Filters', accountType: 'IMAP/SMTP and zele.sh', hint: 'Filters are a Gmail-specific feature.' }))
+        out.fail(new UnsupportedError({ feature: 'Filters', accountType: 'IMAP/SMTP and zele.sh', hint: 'Filters are a Gmail-specific feature.' }))
       }
 
       const results = await Promise.all(

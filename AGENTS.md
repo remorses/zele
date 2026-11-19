@@ -10,6 +10,15 @@ the TUI (the root command) is only supported in bun. our bin file tries to use b
 - `zele/src/db.ts` owns the SQLite connection; `schema.ts` and `schema.sql` define storage.
 - Root `README.md` and `skills/zele/SKILL.md` are the source docs. Copies in `zele/` are generated.
 - `mail watch` only waits and prints a candidate. Backgrounding, reply validation and send approval are the agent's job (see the skill).
+- `zele mcp` uses `createMcpAction` from `@goke/mcp`: every command is a stdio MCP tool, except the ones in `MCP_EXCLUDED_COMMANDS` in `cli.ts`. goke runs the action with a capturing ctx, so the tool result is what the command printed.
+
+## command output
+
+commands print only through the injected goke ctx: `const out: Output = createOutput(ctx)` at the top of each action, then `out.printYaml`, `out.hint`, `out.log`, `out.exit`, `out.fail`. pass `out` as the first argument to helpers that print.
+
+never use `console.*`, `process.stdout` or `process.exit` in command files. in `zele mcp` stdout is the JSON-RPC channel and `process.exit` kills the server. `ctx.process.exit` throws instead, and goke turns it into an error tool result.
+
+keep the `: Output` annotation: TypeScript only narrows after `out.fail(x)` (a `never` call) when `out` has an explicit type.
 
 ## development
 
@@ -82,11 +91,11 @@ read the errore best practices and skill before writing any error handling code:
 - **use `errore.tryAsync({ try, catch })`** at the boundary layer (googleapis, tsdav) to convert throws into typed error values. see the `gmailBoundary()` and `caldavBoundary()` helpers in the client files.
 - **use `errore.tryFn()`** for synchronous boundary calls (e.g. JSON.parse, iCal parsing).
 - **return errors as values** from client methods. use `return new AuthError(...)` not `throw new AuthError(...)`.
-- **check with instanceof** at the call site: `if (result instanceof Error) handleCommandError(result)`.
+- **check with instanceof** at the call site: `if (result instanceof Error) out.fail(result)`.
 - **use `instanceof Error`** (base class) when you want to catch any domain error. use `instanceof AuthError` etc. when you need specific handling.
 - **use `errore.unwrap()`** at entry points where failure is fatal (login, migration).
 - **define tagged error classes** in `zele/src/api-utils.ts` using `errore.createTaggedError()` with `$variable` interpolation.
-- **use `handleCommandError()`** from `zele/src/output.ts` in command files instead of manual `out.error()` + `process.exit(1)`.
+- **use `out.fail(err)`** in command files instead of manual `out.error()` + `out.exit(1)`. `out` comes from `createOutput(ctx)` (see "command output" above).
 - **never string-match error messages**. use instanceof narrowing instead. the only exception is `isAuthLikeError()` which translates external library exceptions at the boundary.
 
 ### errore.try is only for external code
@@ -169,7 +178,7 @@ write error handling in a flat, go-like, non-nested style. check errors early an
 ```typescript
 // good: flat, early return
 const result = await client.getEvent({ calendarId, eventId })
-if (result instanceof Error) handleCommandError(result)
+if (result instanceof Error) out.fail(result)
 // continue with result...
 
 // bad: nested

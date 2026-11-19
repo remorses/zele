@@ -12,8 +12,7 @@ import { login, loginImap, loginMicrosoft, logout, listAccounts, getAuthStatuses
 import { runZeleLogin } from './inbox.js'
 import { resolveZeleApiUrl } from '../zele-sh-client.js'
 import { closeDb } from '../db.js'
-import * as out from '../output.js'
-import { handleCommandError } from '../output.js'
+import { createOutput, type Output } from '../output.js'
 import type { BrowserAuthOptions } from '../oauth-callback-server.js'
 
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000
@@ -22,9 +21,10 @@ async function runBrowserOAuth(
   ctx: GokeExecutionContext,
   run: (options?: BrowserAuthOptions) => Promise<{ email: string } | Error>,
 ) {
+  const out: Output = createOutput(ctx)
   const execute = async (options?: BrowserAuthOptions) => {
     const result = await run(options)
-    if (result instanceof Error) handleCommandError(result)
+    if (result instanceof Error) out.fail(result)
     out.success(`Authenticated as ${result.email}`)
     await closeDb()
   }
@@ -68,12 +68,13 @@ export function registerAuthCommands(cli: ZeleCli) {
     .example('zele login --method zele')
     .example('zele login imap')
     .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       let method = options.method
 
       if (!method) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Run non-interactively with: zele login --method google|imap|microsoft|zele')
-          process.exit(1)
+          out.exit(1)
         }
 
         const choice = await clack.select({
@@ -88,7 +89,7 @@ export function registerAuthCommands(cli: ZeleCli) {
 
         if (clack.isCancel(choice)) {
           out.hint('Cancelled')
-          process.exit(0)
+          out.exit(0)
         }
 
         method = choice
@@ -106,7 +107,7 @@ export function registerAuthCommands(cli: ZeleCli) {
       }
 
       if (method === 'zele') {
-        await runZeleLogin({})
+        await runZeleLogin(out, {})
         return
       }
 
@@ -130,7 +131,8 @@ export function registerAuthCommands(cli: ZeleCli) {
     .option('--ca [ca]', z.string().optional().describe('Path to a PEM CA cert to trust (e.g. Proton Bridge cert.pem)'))
     .option('--insecure', 'Skip TLS certificate verification (unsafe; prefer --ca)')
     .option('--no-tls', 'Disable implicit TLS for IMAP; STARTTLS is attempted when advertised')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const interactive = !isAgent && process.stdin.isTTY
 
       // --- email ---
@@ -138,14 +140,14 @@ export function registerAuthCommands(cli: ZeleCli) {
       if (!email) {
         if (!interactive) {
           out.error('Missing --email. Usage: zele login imap --email you@example.com --imap-host imap.example.com --password "pwd"')
-          process.exit(1)
+          out.exit(1)
         }
         const v = await clack.text({
           message: 'Email address',
           placeholder: 'you@example.com',
           validate: (value) => value?.trim() ? undefined : 'Email address is required',
         })
-        if (clack.isCancel(v)) process.exit(0)
+        if (clack.isCancel(v)) out.exit(0)
         email = v
       }
 
@@ -165,15 +167,15 @@ export function registerAuthCommands(cli: ZeleCli) {
             { value: 'custom', label: 'Custom', hint: 'enter IMAP/SMTP hosts manually' },
           ],
         })
-        if (clack.isCancel(provider)) process.exit(0)
+        if (clack.isCancel(provider)) out.exit(0)
 
         if (provider === 'outlook') {
           out.hint('Outlook password IMAP is disabled. Starting Microsoft OAuth...')
           const result = await loginMicrosoft({ email })
-          if (result instanceof Error) handleCommandError(result)
+          if (result instanceof Error) out.fail(result)
           out.success(`Authenticated as ${result.email}`)
           await closeDb()
-          process.exit(0)
+          out.exit(0)
         }
 
         const presets = {
@@ -193,7 +195,7 @@ export function registerAuthCommands(cli: ZeleCli) {
             placeholder: 'imap.example.com',
             validate: (value) => value?.trim() ? undefined : 'IMAP hostname is required',
           })
-          if (clack.isCancel(ih)) process.exit(0)
+          if (clack.isCancel(ih)) out.exit(0)
           imapHost = ih
 
           const ip = await clack.text({
@@ -204,11 +206,11 @@ export function registerAuthCommands(cli: ZeleCli) {
               return Number.isInteger(n) && n > 0 ? undefined : 'Must be a positive integer'
             },
           })
-          if (clack.isCancel(ip)) process.exit(0)
+          if (clack.isCancel(ip)) out.exit(0)
           imapPort = ip
 
           const sh = await clack.text({ message: 'SMTP hostname (leave empty for read-only)', placeholder: 'smtp.example.com' })
-          if (clack.isCancel(sh)) process.exit(0)
+          if (clack.isCancel(sh)) out.exit(0)
           smtpHost = sh || undefined
 
           if (smtpHost) {
@@ -220,7 +222,7 @@ export function registerAuthCommands(cli: ZeleCli) {
                 return Number.isInteger(n) && n > 0 ? undefined : 'Must be a positive integer'
               },
             })
-            if (clack.isCancel(sp)) process.exit(0)
+            if (clack.isCancel(sp)) out.exit(0)
             smtpPort = sp
           }
         }
@@ -229,7 +231,7 @@ export function registerAuthCommands(cli: ZeleCli) {
       if (!imapHost) {
         if (!interactive) {
           out.error('Missing --imap-host. Usage: zele login imap --email you@example.com --imap-host imap.example.com --password "pwd"')
-          process.exit(1)
+          out.exit(1)
         }
       }
 
@@ -238,13 +240,13 @@ export function registerAuthCommands(cli: ZeleCli) {
       if (!password && !options.imapPassword) {
         if (!interactive) {
           out.error('Missing --password. Usage: zele login imap --email you@example.com --imap-host imap.example.com --password "pwd"')
-          process.exit(1)
+          out.exit(1)
         }
         const v = await clack.password({
           message: 'App password',
           validate: (value) => value?.trim() ? undefined : 'Password is required',
         })
-        if (clack.isCancel(v)) process.exit(0)
+        if (clack.isCancel(v)) out.exit(0)
         password = v
       }
 
@@ -255,7 +257,7 @@ export function registerAuthCommands(cli: ZeleCli) {
           try: () => fs.readFileSync(caPath, 'utf8'),
           catch: (err) => new Error(`Failed to read --ca file: ${caPath}`, { cause: err }),
         })
-        if (caResult instanceof Error) handleCommandError(caResult)
+        if (caResult instanceof Error) out.fail(caResult)
         ca = caResult
       }
 
@@ -277,12 +279,12 @@ export function registerAuthCommands(cli: ZeleCli) {
         ca,
         insecure: options.insecure,
       })
-      if (result instanceof Error) handleCommandError(result)
+      if (result instanceof Error) out.fail(result)
 
       const caps = smtpHost ? 'IMAP + SMTP' : 'IMAP only'
       out.success(`Authenticated ${result.email} (${caps})`)
       await closeDb()
-      process.exit(0)
+      out.exit(0)
     })
 
   cli
@@ -291,6 +293,7 @@ export function registerAuthCommands(cli: ZeleCli) {
     .example('zele login microsoft')
     .example('zele login microsoft --email you@outlook.com')
     .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       await runBrowserOAuth(ctx, (authOptions) => loginMicrosoft({ ...authOptions, email: options.email }))
     })
 
@@ -307,15 +310,17 @@ export function registerAuthCommands(cli: ZeleCli) {
     .example('zele login zele --owner you@gmail.com')
     .example('zele login zele --owner you@gmail.com --name tommy')
     .example('zele login zele --owner you@gmail.com --code 482913')
-    .action(async (options) => {
-      await runZeleLogin(options)
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
+      await runZeleLogin(out, options)
     })
 
   cli
     .command('logout zele', 'Sign out of zele.sh and remove all @zele.sh accounts from this machine. Inboxes and mail stay on the server')
     .option('--force', 'Skip confirmation')
     .option('--api-url [apiUrl]', z.string().optional().describe('zele.sh server URL (default: https://zele.sh, env: ZELE_API_URL)'))
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const apiUrl = resolveZeleApiUrl(options.apiUrl)
       const session = getZeleShSession(apiUrl)
       if (!session) {
@@ -326,7 +331,7 @@ export function registerAuthCommands(cli: ZeleCli) {
       if (!options.force) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Use --force to logout non-interactively: zele logout zele --force')
-          process.exit(1)
+          out.exit(1)
         }
         const confirmed = await clack.confirm({
           message: `Sign out ${session.ownerEmail} and remove ${inboxes.length} @zele.sh account(s) from this machine?`,
@@ -335,14 +340,15 @@ export function registerAuthCommands(cli: ZeleCli) {
         if (clack.isCancel(confirmed) || !confirmed) return
       }
       const removed = await removeZeleShSession(apiUrl)
-      if (removed instanceof Error) handleCommandError(removed)
+      if (removed instanceof Error) out.fail(removed)
       out.success(`Signed out of zele.sh (${session.ownerEmail}), removed ${inboxes.length} inbox account(s)`)
     })
 
   cli
     .command('logout [email]', 'Remove stored credentials for an account')
     .option('--force', 'Skip confirmation')
-    .action(async (email, options) => {
+    .action(async (email, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const accounts = await listAccounts()
 
       if (accounts.length === 0) {
@@ -357,9 +363,9 @@ export function registerAuthCommands(cli: ZeleCli) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Multiple accounts logged in. Specify which to remove:')
           for (const e of emails) {
-            console.error(`  ${e}`)
+            ctx.console.error(`  ${e}`)
           }
-          process.exit(1)
+          out.exit(1)
         }
 
         const choice = await clack.select({
@@ -379,13 +385,13 @@ export function registerAuthCommands(cli: ZeleCli) {
       if (!emails.includes(targetEmail)) {
         out.error(`Account not found: ${targetEmail}`)
         out.hint(`Logged in accounts: ${emails.join(', ')}`)
-        process.exit(1)
+        out.exit(1)
       }
 
       if (!options.force) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Use --force to logout non-interactively')
-          process.exit(1)
+          out.exit(1)
         }
 
         const confirmed = await clack.confirm({
@@ -400,13 +406,14 @@ export function registerAuthCommands(cli: ZeleCli) {
       }
 
       const logoutResult = await logout(targetEmail)
-      if (logoutResult instanceof Error) handleCommandError(logoutResult)
+      if (logoutResult instanceof Error) out.fail(logoutResult)
       out.success(`Credentials removed for ${targetEmail}`)
     })
 
   cli
     .command('whoami', 'Show authenticated accounts')
-    .action(async () => {
+    .action(async (_options, ctx) => {
+      const out: Output = createOutput(ctx)
       const statuses = await getAuthStatuses()
 
       if (statuses.length === 0) {

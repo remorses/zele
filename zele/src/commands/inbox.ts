@@ -23,8 +23,7 @@ import {
 } from '../auth.js'
 import { abortableSleep } from '../api-utils.js'
 import { codeFromSubject, resolveZeleApiUrl, sendZeleShCode, signInZeleSh, ZELE_SH_DOMAIN } from '../zele-sh-client.js'
-import * as out from '../output.js'
-import { handleCommandError } from '../output.js'
+import { createOutput, type Output } from '../output.js'
 
 const API_URL_DESCRIPTION = 'zele.sh server URL (default: https://zele.sh, env: ZELE_API_URL)'
 const CODE_POLL_INTERVAL_MS = 3_000
@@ -44,7 +43,7 @@ async function gmailAccountsInZele(): Promise<string[]> {
   return accounts.filter((a) => a.accountType === 'google' && canonicalGmail(a.email)).map((a) => a.email)
 }
 
-async function chooseOwnerEmail(): Promise<string> {
+async function chooseOwnerEmail(out: Output): Promise<string> {
   const gmails = await gmailAccountsInZele()
   if (isAgent || !process.stdin.isTTY) {
     out.error('Missing --owner. The owner must be a @gmail.com address.')
@@ -54,7 +53,7 @@ async function chooseOwnerEmail(): Promise<string> {
     } else {
       out.hint('Usage: zele login zele --owner you@gmail.com')
     }
-    process.exit(1)
+    out.exit(1)
   }
   const OTHER = '__other__'
   const choice = gmails.length > 0
@@ -66,19 +65,19 @@ async function chooseOwnerEmail(): Promise<string> {
         ],
       })
     : OTHER
-  if (clack.isCancel(choice)) process.exit(0)
+  if (clack.isCancel(choice)) out.exit(0)
   if (choice !== OTHER) return choice
   const typed = await clack.text({
     message: 'Gmail address',
     placeholder: 'you@gmail.com',
     validate: (value) => (value && canonicalGmail(value) ? undefined : 'Must be a @gmail.com address'),
   })
-  if (clack.isCancel(typed)) process.exit(0)
+  if (clack.isCancel(typed)) out.exit(0)
   return typed
 }
 
 /** Waits for the code email in a Gmail account already logged in to zele, then trashes it. */
-async function readCodeFromGmail({ gmail, sentAt }: { gmail: string; sentAt: number }): Promise<string | Error> {
+async function readCodeFromGmail(out: Output, { gmail, sentAt }: { gmail: string; sentAt: number }): Promise<string | Error> {
   const clients = await getClients([gmail])
   const client = clients[0]!.client
   const deadline = Date.now() + CODE_POLL_TIMEOUT_MS
@@ -106,30 +105,30 @@ async function readCodeFromGmail({ gmail, sentAt }: { gmail: string; sentAt: num
  * Signs in to zele.sh and stores the session. Returns null when a code was sent
  * but must be passed with --code in a second run (agents, non-zele Gmail).
  */
-async function signIn({ apiUrl, email, code }: { apiUrl: string; email?: string; code?: string }) {
-  const ownerInput = email ?? (await chooseOwnerEmail())
+async function signIn(out: Output, { apiUrl, email, code }: { apiUrl: string; email?: string; code?: string }) {
+  const ownerInput = email ?? (await chooseOwnerEmail(out))
   const owner = canonicalGmail(ownerInput)
   if (!owner) {
-    handleCommandError(new Error(`zele.sh owners must be @gmail.com addresses, got ${ownerInput}. Try: zele login zele --owner you@gmail.com`))
+    out.fail(new Error(`zele.sh owners must be @gmail.com addresses, got ${ownerInput}. Try: zele login zele --owner you@gmail.com`))
   }
 
   let otp = code
   if (!otp) {
     const sentAt = Date.now()
     const sent = await sendZeleShCode({ apiUrl, email: owner })
-    if (sent instanceof Error) handleCommandError(sent)
+    if (sent instanceof Error) out.fail(sent)
     const gmail = (await gmailAccountsInZele()).find((e) => canonicalGmail(e) === owner)
     if (gmail) {
       out.hint(`Sent a code to ${gmail}. Reading it from that inbox...`)
-      const read = await readCodeFromGmail({ gmail, sentAt })
-      if (read instanceof Error) handleCommandError(read)
+      const read = await readCodeFromGmail(out, { gmail, sentAt })
+      if (read instanceof Error) out.fail(read)
       otp = read
     } else if (!isAgent && process.stdin.isTTY) {
       const typed = await clack.text({
         message: `Code sent to ${owner}. Enter it`,
         validate: (value) => (value && /^\d{6}$/.test(value.trim()) ? undefined : 'The code has 6 digits'),
       })
-      if (clack.isCancel(typed)) process.exit(0)
+      if (clack.isCancel(typed)) out.exit(0)
       otp = typed.trim()
     } else {
       out.success(`Sent a code to ${owner}`)
@@ -139,64 +138,64 @@ async function signIn({ apiUrl, email, code }: { apiUrl: string; email?: string;
   }
 
   const session = await signInZeleSh({ apiUrl, email: owner, code: otp })
-  if (session instanceof Error) handleCommandError(session)
+  if (session instanceof Error) out.fail(session)
   const saved = await saveZeleShSession({ apiUrl, ownerEmail: session.ownerEmail, token: session.token })
-  if (saved instanceof Error) handleCommandError(saved)
+  if (saved instanceof Error) out.fail(saved)
   return session
 }
 
 /** Makes local zele.sh accounts for this server match the owner's inboxes on the server. */
-async function syncInboxes(apiUrl: string) {
+async function syncInboxes(out: Output, apiUrl: string) {
   const api = zeleShApiFor(apiUrl)
-  if (api instanceof Error) handleCommandError(api)
+  if (api instanceof Error) out.fail(api)
   const list = await api.listInboxes()
-  if (list instanceof Error) handleCommandError(list)
+  if (list instanceof Error) out.fail(list)
   const remote = new Set(list.inboxes.map((i) => i.address))
   for (const address of listZeleShAccounts(apiUrl).filter((a) => !remote.has(a))) {
     const removed = await removeZeleShAccount(address)
-    if (removed instanceof Error) handleCommandError(removed)
+    if (removed instanceof Error) out.fail(removed)
   }
   for (const inbox of list.inboxes) {
     const saved = await saveZeleShAccount({ address: inbox.address, apiUrl })
-    if (saved instanceof Error) handleCommandError(saved)
+    if (saved instanceof Error) out.fail(saved)
   }
   return list
 }
 
-async function createInbox({ apiUrl, name }: { apiUrl: string; name: string }) {
+async function createInbox(out: Output, { apiUrl, name }: { apiUrl: string; name: string }) {
   const api = zeleShApiFor(apiUrl)
-  if (api instanceof Error) handleCommandError(api)
+  if (api instanceof Error) out.fail(api)
   const created = await api.createInbox({ name })
-  if (created instanceof Error) handleCommandError(created)
+  if (created instanceof Error) out.fail(created)
   const saved = await saveZeleShAccount({ address: created.address, apiUrl })
-  if (saved instanceof Error) handleCommandError(saved)
+  if (saved instanceof Error) out.fail(saved)
   return created
 }
 
-async function promptInboxName(): Promise<string> {
+async function promptInboxName(out: Output): Promise<string> {
   const name = await clack.text({
     message: 'Inbox name',
     placeholder: 'tommy',
     validate: (value) =>
       value && /^[a-z0-9][a-z0-9._-]{2,30}(@zele\.sh)?$/i.test(value.trim()) ? undefined : '3-31 chars: a-z 0-9 . _ -',
   })
-  if (clack.isCancel(name)) process.exit(0)
+  if (clack.isCancel(name)) out.exit(0)
   return name.trim()
 }
 
-export async function runZeleLogin(options: { owner?: string; code?: string; name?: string; apiUrl?: string }) {
+export async function runZeleLogin(out: Output, options: { owner?: string; code?: string; name?: string; apiUrl?: string }) {
   const apiUrl = resolveZeleApiUrl(options.apiUrl)
-  const session = await signIn({ apiUrl, email: options.owner, code: options.code })
+  const session = await signIn(out, { apiUrl, email: options.owner, code: options.code })
   if (!session) return
   out.success(`Signed in to zele.sh as ${session.ownerEmail}`)
-  const list = await syncInboxes(apiUrl)
+  const list = await syncInboxes(out, apiUrl)
 
   let name = options.name
   if (!name && list.inboxes.length === 0 && !isAgent && process.stdin.isTTY) {
     const create = await clack.confirm({ message: 'You have no zele.sh inboxes yet. Create one now?' })
-    if (!clack.isCancel(create) && create) name = await promptInboxName()
+    if (!clack.isCancel(create) && create) name = await promptInboxName(out)
   }
-  const created = name ? await createInbox({ apiUrl, name }) : null
+  const created = name ? await createInbox(out, { apiUrl, name }) : null
   out.printYaml({
     owner: session.ownerEmail,
     inboxes_added: list.inboxes.map((i) => i.address),
@@ -218,22 +217,23 @@ export function registerInboxCommands(cli: ZeleCli) {
     .option(...apiUrlOption)
     .example('zele inbox create tommy')
     .example('zele inbox create tommy --owner you@gmail.com')
-    .action(async (nameArg, options) => {
+    .action(async (nameArg, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const apiUrl = resolveZeleApiUrl(options.apiUrl)
       if (!getZeleShSession(apiUrl)) {
-        const session = await signIn({ apiUrl, email: options.owner, code: options.code })
+        const session = await signIn(out, { apiUrl, email: options.owner, code: options.code })
         if (!session) return
-        await syncInboxes(apiUrl)
+        await syncInboxes(out, apiUrl)
       }
       let name = nameArg
       if (!name) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Missing inbox name. Usage: zele inbox create <name>')
-          process.exit(1)
+          out.exit(1)
         }
-        name = await promptInboxName()
+        name = await promptInboxName(out)
       }
-      const created = await createInbox({ apiUrl, name })
+      const created = await createInbox(out, { apiUrl, name })
       out.printYaml({
         address: created.address,
         inboxes_used: `${created.used}/${created.limit}`,
@@ -244,12 +244,13 @@ export function registerInboxCommands(cli: ZeleCli) {
   cli
     .command('inbox list', 'List your @zele.sh inboxes on the server')
     .option(...apiUrlOption)
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const apiUrl = resolveZeleApiUrl(options.apiUrl)
       const api = zeleShApiFor(apiUrl)
-      if (api instanceof Error) handleCommandError(api)
+      if (api instanceof Error) out.fail(api)
       const list = await api.listInboxes()
-      if (list instanceof Error) handleCommandError(list)
+      if (list instanceof Error) out.fail(list)
       const local = new Set(listZeleShAccounts(apiUrl))
       out.printList(
         list.inboxes.map((i) => ({ address: i.address, created: i.createdAt, on_this_machine: local.has(i.address) })),
@@ -263,13 +264,14 @@ export function registerInboxCommands(cli: ZeleCli) {
     .option('--force', 'Skip confirmation')
     .option(...apiUrlOption)
     .example('zele inbox delete tommy@zele.sh --force')
-    .action(async (address, options) => {
+    .action(async (address, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const apiUrl = resolveZeleApiUrl(options.apiUrl)
       const full = address.includes('@') ? address.toLowerCase() : `${address.toLowerCase()}@${ZELE_SH_DOMAIN}`
       if (!options.force) {
         if (isAgent || !process.stdin.isTTY) {
           out.error(`Use --force to delete non-interactively: zele inbox delete ${full} --force`)
-          process.exit(1)
+          out.exit(1)
         }
         const confirmed = await clack.confirm({
           message: `Delete ${full} and all its mail? The address can never be used again.`,
@@ -278,11 +280,11 @@ export function registerInboxCommands(cli: ZeleCli) {
         if (clack.isCancel(confirmed) || !confirmed) return
       }
       const api = zeleShApiFor(apiUrl)
-      if (api instanceof Error) handleCommandError(api)
+      if (api instanceof Error) out.fail(api)
       const deleted = await api.deleteInbox({ address: full })
-      if (deleted instanceof Error) handleCommandError(deleted)
+      if (deleted instanceof Error) out.fail(deleted)
       const removed = await removeZeleShAccount(deleted.address)
-      if (removed instanceof Error) handleCommandError(removed)
+      if (removed instanceof Error) out.fail(removed)
       out.printYaml({ deleted: deleted.address, deleted_messages: deleted.deletedMessages })
     })
 }

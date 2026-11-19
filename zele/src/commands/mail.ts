@@ -16,10 +16,10 @@ import type { GmailClient } from '../gmail-client.js'
 import { AuthError, NotFoundError, UnsupportedError } from '../api-utils.js'
 import { getThreadSeenMessageId, setThreadSeenMessageId } from '../db.js'
 import { hasUnsubscribeMechanism, hasOneClickUnsubscribe } from '../unsubscribe.js'
-import * as out from '../output.js'
-import { handleCommandError } from '../output.js'
+import { createOutput, formatDate, formatFlags, formatSender, renderEmailBody, type Output } from '../output.js'
 import { REPLY_FOLLOW_UP_HINT, replyWatchCommand } from './watch.js'
-import { colors as pc } from 'goke'
+import { colors as pc, type GokeExecutionContext } from 'goke'
+import { isMcpToolCall } from '@goke/mcp'
 
 // ---------------------------------------------------------------------------
 // Label formatting — filter out system labels already represented by flags
@@ -51,7 +51,7 @@ function parseEmailList(value?: string): Array<{ email: string }> | undefined {
   return parsed.length > 0 ? parsed : undefined
 }
 
-async function markThreadSeen({
+async function markThreadSeen(out: Output, {
   email,
   appId,
   threadId,
@@ -66,11 +66,11 @@ async function markThreadSeen({
   if (!last) return
   const result = await setThreadSeenMessageId({ email, appId, threadId, messageId: last.id })
   if (result instanceof Error) {
-    console.warn('Failed to record thread read:', result.message)
+    out.warn('Failed to record thread read:', result.message)
   }
 }
 
-async function loadSeenMessageId({
+async function loadSeenMessageId(out: Output, {
   email,
   appId,
   threadId,
@@ -83,17 +83,29 @@ async function loadSeenMessageId({
 }) {
   if (force) return undefined
   const seen = await getThreadSeenMessageId({ email, appId, threadId })
-  if (seen instanceof Error) handleCommandError(seen)
+  if (seen instanceof Error) out.fail(seen)
   return seen
 }
 
-export function resolveAttachments(filePaths?: string[]) {
+/** Reads `--body-file`, where `-` means stdin. In `zele mcp` stdin is the JSON-RPC channel, so refuse it. */
+export async function readBodyFile(out: Output, ctx: GokeExecutionContext, bodyFile: string): Promise<string> {
+  if (bodyFile !== '-') return fs.readFileSync(bodyFile, 'utf-8')
+  if (isMcpToolCall(ctx)) {
+    out.error('bodyFile "-" reads stdin, which is the MCP channel. Pass body instead')
+    out.exit(1)
+  }
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(chunk)
+  return Buffer.concat(chunks).toString('utf-8')
+}
+
+export function resolveAttachments(out: Output, filePaths?: string[]) {
   return filePaths
     ? filePaths.map((filePath) => {
         const resolved = path.resolve(filePath)
         if (!fs.existsSync(resolved)) {
           out.error(`Attachment not found: ${resolved}`)
-          process.exit(1)
+          out.exit(1)
         }
         return {
           filename: path.basename(resolved),
@@ -125,7 +137,8 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
     .option('--label <label>', 'Filter by label name')
     .option('--filter <filter>', 'Gmail search filter (e.g. "is:unread", "from:github", "has:attachment")')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       // `options.folder` / `options.limit` are `string | undefined` now.
       // `''` (bare flag) falls back to the default via `||`.
       const folder = options.folder || 'inbox'
@@ -134,7 +147,7 @@ export function registerMailCommands(cli: ZeleCli) {
 
       if (options.page && clients.length > 1) {
         out.error('--page cannot be used with multiple accounts (page tokens are per-account)')
-        process.exit(1)
+        out.exit(1)
       }
 
       // Fetch threads and labels from all accounts concurrently
@@ -182,7 +195,7 @@ export function registerMailCommands(cli: ZeleCli) {
         else allResults.push(r)
       }
       if (allResults.length === 0) {
-        handleCommandError(failures[0] ?? new Error('Failed to fetch'))
+        out.fail(failures[0] ?? new Error('Failed to fetch'))
       }
       for (const r of failures) {
         if (r instanceof AuthError) out.error(`${r.message}. Try: zele login`)
@@ -209,21 +222,21 @@ export function registerMailCommands(cli: ZeleCli) {
       const showAccount = clients.length > 1
       out.printList(
         merged.map((t) => {
-          const to = t.to.map((s) => out.formatSender(s)).join(', ')
-          const cc = t.cc.map((s) => out.formatSender(s)).join(', ')
+          const to = t.to.map((s) => formatSender(s)).join(', ')
+          const cc = t.cc.map((s) => formatSender(s)).join(', ')
           const labels = formatLabels(t.labelIds, labelMap)
           const canUnsubscribe = hasUnsubscribeMechanism(t.listUnsubscribe)
           const oneClick = hasOneClickUnsubscribe(t.listUnsubscribe, t.listUnsubscribePost)
           return {
             ...(showAccount ? { account: t.account } : {}),
             id: t.id,
-            flags: out.formatFlags(t),
-            from: out.formatSender(t.from),
+            flags: formatFlags(t),
+            from: formatSender(t.from),
             ...(to ? { to } : {}),
             ...(cc ? { cc } : {}),
             subject: t.subject,
             snippet: t.snippet,
-            date: out.formatDate(t.date),
+            date: formatDate(t.date),
             messages: t.messageCount,
             ...(labels ? { labels } : {}),
             ...(canUnsubscribe ? { can_unsubscribe: true } : {}),
@@ -243,13 +256,14 @@ export function registerMailCommands(cli: ZeleCli) {
     .command('mail search <query>', 'Search email threads using Gmail query syntax (from:, to:, subject:, has:attachment, etc). See https://support.google.com/mail/answer/7190')
     .option('--limit [limit]', 'Max results to show (default: 20)')
     .option('--page <page>', 'Pagination token (requires --account, only works for a single account)')
-    .action(async (query, options) => {
+    .action(async (query, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const limit = options.limit ? Number(options.limit) : 20
       const clients = await getClients(options.account)
 
       if (options.page && clients.length > 1) {
         out.error('--page cannot be used with multiple accounts (page tokens are per-account)')
-        process.exit(1)
+        out.exit(1)
       }
 
       // Search all accounts concurrently (fetch labels alongside for name resolution)
@@ -298,21 +312,21 @@ export function registerMailCommands(cli: ZeleCli) {
       const showAccount = clients.length > 1
       out.printList(
         merged.map((t) => {
-          const to = t.to.map((s) => out.formatSender(s)).join(', ')
-          const cc = t.cc.map((s) => out.formatSender(s)).join(', ')
+          const to = t.to.map((s) => formatSender(s)).join(', ')
+          const cc = t.cc.map((s) => formatSender(s)).join(', ')
           const labels = formatLabels(t.labelIds, labelMap)
           const canUnsubscribe = hasUnsubscribeMechanism(t.listUnsubscribe)
           const oneClick = hasOneClickUnsubscribe(t.listUnsubscribe, t.listUnsubscribePost)
           return {
             ...(showAccount ? { account: t.account } : {}),
             id: t.id,
-            flags: out.formatFlags(t),
-            from: out.formatSender(t.from),
+            flags: formatFlags(t),
+            from: formatSender(t.from),
             ...(to ? { to } : {}),
             ...(cc ? { cc } : {}),
             subject: t.subject,
             snippet: t.snippet,
-            date: out.formatDate(t.date),
+            date: formatDate(t.date),
             messages: t.messageCount,
             ...(labels ? { labels } : {}),
             ...(canUnsubscribe ? { can_unsubscribe: true } : {}),
@@ -333,35 +347,36 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--raw', 'Show raw message (first message only, single thread)')
     .option('--raw-html', 'Show raw HTML body per message (no markdown conversion)')
     .option('--verify', 'Show expanded authentication details (SPF/DKIM/DMARC) and threading headers')
-    .action(async (threadIds, options) => {
+    .action(async (threadIds, options, ctx) => {
+      const out: Output = createOutput(ctx)
       if (threadIds.length === 0) {
         out.error('No thread IDs provided')
-        process.exit(1)
+        out.exit(1)
       }
 
       const { client, email, appId } = await getClient(options.account)
 
       if (options.raw && options.rawHtml) {
         out.error('--raw and --raw-html cannot be used together')
-        process.exit(1)
+        out.exit(1)
       }
 
       if (options.raw) {
         if (threadIds.length > 1) {
           out.error('--raw only supports a single thread ID')
-          process.exit(1)
+          out.exit(1)
         }
         const threadResult = await client.getThread({ threadId: threadIds[0]!, skipCache: true, headersOnly: true })
-        if (threadResult instanceof Error) handleCommandError(threadResult)
+        if (threadResult instanceof Error) out.fail(threadResult)
         const thread = threadResult.parsed
         if (thread.messages.length === 0) {
           out.hint('No messages in thread')
           return
         }
         const rawMsg = await client.getRawMessage({ messageId: thread.messages[0]!.id })
-        if (rawMsg instanceof Error) handleCommandError(rawMsg)
-        console.log(rawMsg)
-        await markThreadSeen({ email, appId, threadId: thread.id, messages: [thread.messages[0]!] })
+        if (rawMsg instanceof Error) out.fail(rawMsg)
+        out.log(rawMsg)
+        await markThreadSeen(out, { email, appId, threadId: thread.id, messages: [thread.messages[0]!] })
         return
       }
 
@@ -381,21 +396,21 @@ export function registerMailCommands(cli: ZeleCli) {
 
         if (multi) {
           const doubleRule = pc.bold('━'.repeat(w))
-          console.log(doubleRule)
-          console.log(pc.bold(`Thread ${i + 1}/${settled.length}`) + pc.dim(` · ${threadIds[i]}`))
-          console.log(doubleRule)
-          console.log()
+          out.log(doubleRule)
+          out.log(pc.bold(`Thread ${i + 1}/${settled.length}`) + pc.dim(` · ${threadIds[i]}`))
+          out.log(doubleRule)
+          out.log()
         }
 
         if (result.status === 'rejected') {
           out.error(`Failed to read thread ${threadIds[i]}: ${String(result.reason)}`)
-          if (multi) console.log()
+          if (multi) out.log()
           continue
         }
 
         if (result.value instanceof Error) {
           out.error(`Failed to read thread ${threadIds[i]}: ${result.value.message}`)
-          if (multi) console.log()
+          if (multi) out.log()
           continue
         }
 
@@ -403,55 +418,55 @@ export function registerMailCommands(cli: ZeleCli) {
 
         if (thread.messages.length === 0) {
           out.hint('No messages in thread')
-          if (multi) console.log()
+          if (multi) out.log()
           continue
         }
 
         if (options.rawHtml) {
           thread.messages.forEach((msg, index) => {
-            console.log(msg.body)
+            out.log(msg.body)
             if (index < thread.messages.length - 1) {
-              console.log('\n<!-- ZELE_MESSAGE_SEPARATOR -->\n')
+              out.log('\n<!-- ZELE_MESSAGE_SEPARATOR -->\n')
             }
           })
-          await markThreadSeen({ email, appId, threadId: thread.id, messages: thread.messages })
-          if (multi) console.log()
+          await markThreadSeen(out, { email, appId, threadId: thread.id, messages: thread.messages })
+          if (multi) out.log()
           continue
         }
 
         // Render thread header
-        console.log(pc.bold(thread.subject))
+        out.log(pc.bold(thread.subject))
         const participants = new Map<string, string>()
         for (const msg of thread.messages) {
           participants.set(msg.from.email, msg.from.name || msg.from.email)
           for (const r of msg.to) participants.set(r.email, r.name || r.email)
         }
         const participantStr = [...participants.values()].join(', ')
-        console.log(pc.dim(`${thread.messageCount} message(s) · ${participantStr}`))
-        console.log(pc.dim(`ID: ${thread.id}`))
-        console.log(rule + '\n')
+        out.log(pc.dim(`${thread.messageCount} message(s) · ${participantStr}`))
+        out.log(pc.dim(`ID: ${thread.id}`))
+        out.log(rule + '\n')
 
         // Render each message
         for (const msg of thread.messages) {
-          const fromStr = out.formatSender(msg.from)
-          const dateStr = out.formatDate(msg.date)
+          const fromStr = formatSender(msg.from)
+          const dateStr = formatDate(msg.date)
 
           const flagParts: string[] = []
           if (msg.unread) flagParts.push(pc.yellow('[unread]'))
           if (msg.starred) flagParts.push(pc.yellow('[starred]'))
           const flagStr = flagParts.length > 0 ? ' ' + flagParts.join(' ') : ''
 
-          console.log(pc.bold(`From: `) + fromStr + flagStr)
-          console.log(pc.dim(`  To: ${msg.to.map((t) => t.email).join(', ')}`))
+          out.log(pc.bold(`From: `) + fromStr + flagStr)
+          out.log(pc.dim(`  To: ${msg.to.map((t) => t.email).join(', ')}`))
           if (msg.cc && msg.cc.length > 0) {
-            console.log(pc.dim(`  Cc: ${msg.cc.map((c) => c.email).join(', ')}`))
+            out.log(pc.dim(`  Cc: ${msg.cc.map((c) => c.email).join(', ')}`))
           }
-          console.log(pc.dim(`Date: ${dateStr}`))
-          console.log(pc.dim(`Message ID: ${msg.id}`))
+          out.log(pc.dim(`Date: ${dateStr}`))
+          out.log(pc.dim(`Message ID: ${msg.id}`))
           if (options.verify) {
-            if (msg.messageId) console.log(pc.dim(`Message-ID: ${msg.messageId}`))
-            if (msg.inReplyTo) console.log(pc.dim(`In-Reply-To: ${msg.inReplyTo}`))
-            if (msg.references) console.log(pc.dim(`References: ${msg.references}`))
+            if (msg.messageId) out.log(pc.dim(`Message-ID: ${msg.messageId}`))
+            if (msg.inReplyTo) out.log(pc.dim(`In-Reply-To: ${msg.inReplyTo}`))
+            if (msg.references) out.log(pc.dim(`References: ${msg.references}`))
           }
 
           if (msg.auth) {
@@ -466,9 +481,9 @@ export function registerMailCommands(cli: ZeleCli) {
               `${check(msg.auth.dmarc)} DMARC`,
             ]
             const label = msg.auth.authentic ? pc.green('authentic') : pc.red('UNVERIFIED')
-            console.log(`Auth: ${parts.join('  ')}  (${label})`)
+            out.log(`Auth: ${parts.join('  ')}  (${label})`)
             if (options.verify) {
-              console.log(pc.dim(`  Raw: ${msg.auth.raw}`))
+              out.log(pc.dim(`  Raw: ${msg.auth.raw}`))
             }
           }
 
@@ -479,17 +494,17 @@ export function registerMailCommands(cli: ZeleCli) {
                 : `${(a.size / 1048576).toFixed(1)} MB`
               return `${a.filename} (${size})`
             })
-            console.log(pc.dim(`Attachments: ${attList.join(', ')}`))
+            out.log(pc.dim(`Attachments: ${attList.join(', ')}`))
           }
 
-          console.log()
+          out.log()
 
-          const body = out.renderEmailBody(msg.body, msg.mimeType)
-          console.log(body)
-          console.log('\n' + rule + '\n')
+          const body = renderEmailBody(msg.body, msg.mimeType)
+          out.log(body)
+          out.log('\n' + rule + '\n')
         }
 
-        await markThreadSeen({ email, appId, threadId: thread.id, messages: thread.messages })
+        await markThreadSeen(out, { email, appId, threadId: thread.id, messages: thread.messages })
       }
     })
 
@@ -511,36 +526,27 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--from <from>', z.string().describe('Send-as alias email'))
     .option('--attach <attach>', z.array(z.string()).describe('File to attach (repeatable: --attach a.pdf --attach b.png)'))
     .option('--force', 'With --thread-id: send even if the latest message was not read')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       // With --thread-id both --to and --subject are inferred from the thread.
       if (!options.to && !options.threadId) {
         out.error('--to is required')
-        process.exit(1)
+        out.exit(1)
       }
       if (!options.subject && !options.threadId) {
         out.error('--subject is required')
-        process.exit(1)
+        out.exit(1)
       }
 
       let body = options.body ?? ''
-      if (options.bodyFile) {
-        if (options.bodyFile === '-') {
-          const chunks: Buffer[] = []
-          for await (const chunk of process.stdin) {
-            chunks.push(chunk)
-          }
-          body = Buffer.concat(chunks).toString('utf-8')
-        } else {
-          body = fs.readFileSync(options.bodyFile, 'utf-8')
-        }
-      }
+      if (options.bodyFile) body = await readBodyFile(out, ctx, options.bodyFile)
 
       if (!body) {
         out.error('--body or --body-file is required')
-        process.exit(1)
+        out.exit(1)
       }
 
-      const attachments = resolveAttachments(options.attach)
+      const attachments = resolveAttachments(out, options.attach)
 
       const to = parseEmailList(options.to)
       const cc = parseEmailList(options.cc)
@@ -552,7 +558,7 @@ export function registerMailCommands(cli: ZeleCli) {
       // the thread's counterparty and the In-Reply-To/References headers (plus
       // Gmail's threadId) are derived from it, so the message actually threads.
       if (options.threadId) {
-        const seenMessageId = await loadSeenMessageId({
+        const seenMessageId = await loadSeenMessageId(out, {
           email,
           appId,
           threadId: options.threadId,
@@ -571,9 +577,9 @@ export function registerMailCommands(cli: ZeleCli) {
           attachments,
           seenMessageId,
         })
-        if (result instanceof Error) handleCommandError(result)
+        if (result instanceof Error) out.fail(result)
         if (result.markReadError) {
-          console.warn('Sent, but failed to mark the thread as read:', result.markReadError.message)
+          out.warn('Sent, but failed to mark the thread as read:', result.markReadError.message)
         }
         if (accountType === 'google' && result.message.id) {
           const marked = await setThreadSeenMessageId({
@@ -583,7 +589,7 @@ export function registerMailCommands(cli: ZeleCli) {
             messageId: result.message.id,
           })
           if (marked instanceof Error) {
-            console.warn('Sent, but failed to record the new message as read:', marked.message)
+            out.warn('Sent, but failed to record the new message as read:', marked.message)
           }
         }
 
@@ -602,11 +608,11 @@ export function registerMailCommands(cli: ZeleCli) {
 
       if (!to) {
         out.error('--to must contain at least one email address')
-        process.exit(1)
+        out.exit(1)
       }
       if (!options.subject) {
         out.error('--subject is required')
-        process.exit(1)
+        out.exit(1)
       }
 
       const result = await client.sendMessage({
@@ -618,7 +624,7 @@ export function registerMailCommands(cli: ZeleCli) {
         fromEmail: options.from,
         attachments,
       })
-      if (result instanceof Error) handleCommandError(result)
+      if (result instanceof Error) out.fail(result)
 
       out.printYaml(result)
       out.success(`Sent to ${options.to}`)
@@ -644,7 +650,8 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--draft', 'Save as draft instead of sending')
     .option('--dry-run', 'Print the resolved recipients and headers without sending')
     .option('--force', 'Reply even if the latest message was not read')
-    .action(async (threadId, options) => {
+    .action(async (threadId, options, ctx) => {
+      const out: Output = createOutput(ctx)
       // --dry-run answers "who would this reply go to?" before committing to send.
       if (options.dryRun) {
         const { client } = await getClient(options.account)
@@ -655,7 +662,7 @@ export function registerMailCommands(cli: ZeleCli) {
           replyAll: options.all,
           allowSelf: options.allowSelf,
         })
-        if (envelope instanceof Error) handleCommandError(envelope)
+        if (envelope instanceof Error) out.fail(envelope)
 
         out.printYaml({
           to: envelope.to.map((r) => r.email),
@@ -672,24 +679,14 @@ export function registerMailCommands(cli: ZeleCli) {
       }
 
       let body = options.body ?? ''
-      if (options.bodyFile) {
-        if (options.bodyFile === '-') {
-          const chunks: Buffer[] = []
-          for await (const chunk of process.stdin) {
-            chunks.push(chunk)
-          }
-          body = Buffer.concat(chunks).toString('utf-8')
-        } else {
-          body = fs.readFileSync(options.bodyFile, 'utf-8')
-        }
-      }
+      if (options.bodyFile) body = await readBodyFile(out, ctx, options.bodyFile)
 
       if (!body) {
         out.error('--body or --body-file is required')
-        process.exit(1)
+        out.exit(1)
       }
 
-      const attachments = resolveAttachments(options.attach)
+      const attachments = resolveAttachments(out, options.attach)
 
       const { client, email: accountEmail, appId, accountType } = await getClient(options.account)
 
@@ -703,7 +700,7 @@ export function registerMailCommands(cli: ZeleCli) {
         out.hint(`Recipient is your own address (${accountEmail})`)
       }
 
-      const seenMessageId = await loadSeenMessageId({
+      const seenMessageId = await loadSeenMessageId(out, {
         email: accountEmail,
         appId,
         threadId,
@@ -723,7 +720,7 @@ export function registerMailCommands(cli: ZeleCli) {
           attachments,
           seenMessageId,
         })
-        if (result instanceof Error) handleCommandError(result)
+        if (result instanceof Error) out.fail(result)
 
         out.printYaml({
           ...result.message,
@@ -748,9 +745,9 @@ export function registerMailCommands(cli: ZeleCli) {
         attachments,
         seenMessageId,
       })
-      if (result instanceof Error) handleCommandError(result)
+      if (result instanceof Error) out.fail(result)
       if (result.markReadError) {
-        console.warn('Sent, but failed to mark the thread as read:', result.markReadError.message)
+        out.warn('Sent, but failed to mark the thread as read:', result.markReadError.message)
       }
       if (accountType === 'google' && result.message.id) {
         const marked = await setThreadSeenMessageId({
@@ -760,7 +757,7 @@ export function registerMailCommands(cli: ZeleCli) {
           messageId: result.message.id,
         })
         if (marked instanceof Error) {
-          console.warn('Sent, but failed to record the new message as read:', marked.message)
+          out.warn('Sent, but failed to record the new message as read:', marked.message)
         }
       }
 
@@ -786,10 +783,11 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--body <body>', z.string().describe('Optional message to prepend'))
     .option('--from <from>', z.string().describe('Send-as alias email'))
     .option('--draft', 'Save as draft instead of sending')
-    .action(async (threadId, options) => {
+    .action(async (threadId, options, ctx) => {
+      const out: Output = createOutput(ctx)
       if (!options.to) {
         out.error('--to is required')
-        process.exit(1)
+        out.exit(1)
       }
 
       const recipients = options.to
@@ -806,7 +804,7 @@ export function registerMailCommands(cli: ZeleCli) {
           body: options.body,
           fromEmail: options.from,
         })
-        if (result instanceof Error) handleCommandError(result)
+        if (result instanceof Error) out.fail(result)
 
         out.printYaml(result)
         out.success('Forward draft created')
@@ -819,7 +817,7 @@ export function registerMailCommands(cli: ZeleCli) {
         body: options.body,
         fromEmail: options.from,
       })
-      if (result instanceof Error) handleCommandError(result)
+      if (result instanceof Error) out.fail(result)
 
       out.printYaml(result)
       out.success(`Forwarded to ${options.to}`)

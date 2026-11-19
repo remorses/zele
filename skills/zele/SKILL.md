@@ -36,6 +36,8 @@ zele --help # NEVER pipe to head/tail, read the full output
 
 The README and `zele --help` output are the source of truth for commands, options, flags, the Google vs IMAP feature matrix, search operators, and the headless login flow.
 
+zele is also an MCP server: `zele mcp` exposes the commands as tools (see the README "MCP server" section). When you have a shell, prefer the CLI.
+
 ## Reply follow-up
 
 After a successful send, reply, forward or draft send, or when the user mentions an email they sent, **check for a reply**, unless they ask not to monitor:
