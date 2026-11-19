@@ -19,7 +19,6 @@ import { hasUnsubscribeMechanism, hasOneClickUnsubscribe } from '../unsubscribe.
 import { createOutput, formatDate, formatFlags, formatSender, renderEmailBody, type Output } from '../output.js'
 import { REPLY_FOLLOW_UP_HINT, replyWatchCommand } from './watch.js'
 import { colors as pc, type GokeExecutionContext } from 'goke'
-import { isMcpToolCall } from '@goke/mcp'
 
 // ---------------------------------------------------------------------------
 // Label formatting — filter out system labels already represented by flags
@@ -90,7 +89,7 @@ async function loadSeenMessageId(out: Output, {
 /** Reads `--body-file`, where `-` means stdin. In `zele mcp` stdin is the JSON-RPC channel, so refuse it. */
 export async function readBodyFile(out: Output, ctx: GokeExecutionContext, bodyFile: string): Promise<string> {
   if (bodyFile !== '-') return fs.readFileSync(bodyFile, 'utf-8')
-  if (isMcpToolCall(ctx)) {
+  if (ctx.isMcpToolCall) {
     out.error('bodyFile "-" reads stdin, which is the MCP channel. Pass body instead')
     out.exit(1)
   }
