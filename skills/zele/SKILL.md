@@ -117,3 +117,6 @@ zele mail read <thread_id> --account me@example.com
     - If the owner Gmail is not a zele account, the code is emailed and the command prints `Rerun with: zele login zele --owner ... --code <code>`. Ask the user for the code.
     - `zele inbox delete <address> --force` deletes the inbox and all its mail. The address can **never** be created again, so confirm with the user first.
     - `zele logout zele --force` removes the session and the inbox accounts from this machine. Inboxes and mail stay on the server.
+13. **Use zele on another machine** by copying `~/.zele/sqlite.db`, following the README "Use zele on another machine" section (`sqlite3 ... ".backup"`, then `scp`). Ask the user before copying it anywhere.
+    - The file holds unencrypted IMAP passwords and OAuth refresh tokens. Never print it, `cat` it, upload it, or send it through chat or email.
+    - Copies do not sync. Run `zele mail read <thread-id>` on the machine that will reply, because read marks are per machine.

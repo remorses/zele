@@ -132,6 +132,33 @@ zele whoami         # show authenticated accounts (type, capabilities)
 zele logout         # remove credentials
 ```
 
+### Use zele on another machine
+
+All zele state is in one **SQLite file**: `~/.zele/sqlite.db`. It holds every account, its OAuth tokens or IMAP password, the zele.sh session, and the mail cache. Copy it to log in on another machine (a server, a VM, an agent box) without a browser.
+
+```bash
+# on the machine that is logged in: make one consistent file (zele uses WAL mode)
+sqlite3 ~/.zele/sqlite.db ".backup /tmp/zele.db"
+scp /tmp/zele.db other-host:/tmp/zele.db && rm /tmp/zele.db
+
+# on the other machine: install the same or a newer zele, then
+mkdir -p -m 700 ~/.zele
+mv /tmp/zele.db ~/.zele/sqlite.db && chmod 600 ~/.zele/sqlite.db
+zele whoami
+```
+
+Without `sqlite3`, stop every zele process first and copy `sqlite.db` together with `sqlite.db-wal` if it exists. Copying `sqlite.db` alone can lose the latest token refresh.
+
+Things to know:
+
+- **The file is a password.** IMAP passwords and OAuth refresh tokens are stored unencrypted. Send it over `scp`/`ssh`, never through chat, email or a synced folder. zele sets `~/.zele` to `700` and the files to `600` on every start.
+- **Both machines keep working.** Each copy refreshes its own access tokens. Google and Microsoft refresh tokens stay valid after use, so one machine does not log out the other.
+- **The copies do not sync.** A `login`, `logout` or `inbox create` changes only that machine. Read marks are per machine too: `mail reply` needs a `mail read` of the thread on the same machine.
+- **Custom OAuth clients.** If you logged in with `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET`, set the same variables on the other machine.
+- **Revoking access** (Google account security page, Microsoft account apps, changing the IMAP password) logs out every copy.
+
+To start clean instead, use the [headless login](#remote--headless-login-for-agents) on the other machine.
+
 ## Commands
 
 ### Mail
