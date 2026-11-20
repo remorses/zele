@@ -13,6 +13,7 @@ import type { ImapSmtpClient } from '../imap-smtp-client.js'
 import { AuthError } from '../api-utils.js'
 import { downloadAttachments } from '../email-utils.js'
 import { resolveAttachments } from './mail.js'
+import { parseThreadIdArg } from '../gmail-link.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 import { colors as pc, isAgent } from 'goke'
@@ -153,6 +154,9 @@ export function registerDraftCommands(cli: ZeleCli) {
 
       const attachments = resolveAttachments(options.attach)
 
+      const threadId = options.thread ? parseThreadIdArg(options.thread) : undefined
+      if (threadId instanceof Error) handleCommandError(threadId)
+
       const { client } = await getClient(options.account)
 
       const result = await client.createDraft({
@@ -161,7 +165,7 @@ export function registerDraftCommands(cli: ZeleCli) {
         body,
         cc: options.cc ? parseEmails(options.cc) : undefined,
         bcc: options.bcc ? parseEmails(options.bcc) : undefined,
-        threadId: options.thread,
+        threadId,
         fromEmail: options.from,
         attachments,
       })

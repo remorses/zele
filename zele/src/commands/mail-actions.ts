@@ -13,6 +13,7 @@ import {
   type UnsubscribeMechanism,
   type UnsubscribePlan,
 } from '../unsubscribe.js'
+import { parseThreadIdArg, parseThreadIdArgs } from '../gmail-link.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 
@@ -21,15 +22,18 @@ import { handleCommandError } from '../output.js'
 // ---------------------------------------------------------------------------
 
 async function bulkAction(
-  threadIds: string[],
+  threadIdArgs: string[],
   actionName: string,
   accountFilter: string[] | undefined,
   fn: (client: ClientEntry['client'], ids: string[]) => Promise<void | Error>,
 ) {
-  if (threadIds.length === 0) {
+  if (threadIdArgs.length === 0) {
     out.error('No thread IDs provided')
     process.exit(1)
   }
+
+  const threadIds = parseThreadIdArgs(threadIdArgs)
+  if (threadIds instanceof Error) handleCommandError(threadIds)
 
   const { client } = await getClient(accountFilter)
   const result = await fn(client, threadIds)
@@ -153,9 +157,12 @@ export function registerMailActionCommands(cli: ZeleCli) {
     .option('--then <then>', z.enum(['nothing', 'archive', 'trash']).describe(
       'Follow-up action on the thread after unsubscribing (default: nothing)',
     ))
-    .action(async (threadId, options) => {
+    .action(async (threadIdArg, options) => {
       const via = options.via ?? 'auto'
       const then = options.then ?? 'nothing'
+
+      const threadId = parseThreadIdArg(threadIdArg)
+      if (threadId instanceof Error) handleCommandError(threadId)
 
       const { client } = await getClient(options.account)
       const threadResult = await client.getThread({ threadId })
