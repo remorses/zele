@@ -157,7 +157,7 @@ zele mail watch --filter "is:unread from:alice"   # wait for a specific email
 zele mail watch --timeout 300                     # wait up to 5 minutes
 ```
 
-Every command that takes a thread ID also takes the link from Gmail's address bar. Pass `--account` for the mailbox the link came from.
+Every command that takes a thread ID also takes the link from Gmail's address bar, and the draft commands take an open draft's link. Pass `--account` for the mailbox the link came from.
 
 `mail list` defaults to **Inbox**. Use `--folder sent` for mail you sent. `is:unread` on `mail list` only matches unread Inbox threads. `mail search` looks in Inbox and Sent on IMAP, and Gmail all-mail on Google accounts.
 

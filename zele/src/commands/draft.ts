@@ -13,7 +13,7 @@ import type { ImapSmtpClient } from '../imap-smtp-client.js'
 import { AuthError } from '../api-utils.js'
 import { downloadAttachments } from '../email-utils.js'
 import { resolveAttachments } from './mail.js'
-import { parseThreadIdArg } from '../gmail-link.js'
+import { parseDraftIdArg, parseThreadIdArg } from '../gmail-link.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 import { colors as pc, isAgent } from 'goke'
@@ -87,7 +87,10 @@ export function registerDraftCommands(cli: ZeleCli) {
 
   cli
     .command('draft get <draftId>', 'Show draft details')
-    .action(async (draftId, options) => {
+    .action(async (draftIdArg, options) => {
+      const draftId = parseDraftIdArg(draftIdArg)
+      if (draftId instanceof Error) handleCommandError(draftId)
+
       const { client } = await getClient(options.account)
 
       const draft = await client.getDraft({ draftId })
@@ -189,7 +192,10 @@ export function registerDraftCommands(cli: ZeleCli) {
     .option('--bcc <bcc>', z.string().describe('New BCC recipients (comma-separated)'))
     .option('--from <from>', z.string().describe('Send-as alias email'))
     .option('--attach <attach>', z.array(z.string()).describe('File to add to the existing attachments (repeatable: --attach a.pdf --attach b.png)'))
-    .action(async (draftId, options) => {
+    .action(async (draftIdArg, options) => {
+      const draftId = parseDraftIdArg(draftIdArg)
+      if (draftId instanceof Error) handleCommandError(draftId)
+
       const newAttachments = resolveAttachments(options.attach) ?? []
 
       const { client } = await getClient(options.account)
@@ -245,7 +251,10 @@ export function registerDraftCommands(cli: ZeleCli) {
 
   cli
     .command('draft send <draftId>', 'Send a draft. To wait for the answer, check existing replies, then run mail watch')
-    .action(async (draftId, options) => {
+    .action(async (draftIdArg, options) => {
+      const draftId = parseDraftIdArg(draftIdArg)
+      if (draftId instanceof Error) handleCommandError(draftId)
+
       const { client } = await getClient(options.account)
       const result = await client.sendDraft({ draftId })
       if (result instanceof Error) handleCommandError(result)
@@ -261,7 +270,10 @@ export function registerDraftCommands(cli: ZeleCli) {
   cli
     .command('draft delete <draftId>', 'Delete a draft')
     .option('--force', 'Skip confirmation')
-    .action(async (draftId, options) => {
+    .action(async (draftIdArg, options) => {
+      const draftId = parseDraftIdArg(draftIdArg)
+      if (draftId instanceof Error) handleCommandError(draftId)
+
       if (!options.force) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Use --force to delete non-interactively')

@@ -1,8 +1,9 @@
 // Tests for turning Gmail web links and view tokens into API thread IDs.
-// Tokens come from Arsenal Recon's write-up and a real thread; all pure, no network.
+// Tokens come from Arsenal Recon's write-up, gmail_compose_encoder's tests and a real
+// thread; all pure, no network.
 
 import { describe, expect, test } from 'vitest'
-import { decodeGmailViewToken, parseThreadIdArg, parseThreadIdArgs } from './gmail-link.js'
+import { decodeGmailViewToken, parseDraftIdArg, parseThreadIdArg, parseThreadIdArgs } from './gmail-link.js'
 
 describe('decodeGmailViewToken', () => {
   test('thread-f tokens', () => {
@@ -102,5 +103,54 @@ describe('parseThreadIdArgs', () => {
 
   test('returns the first error', () => {
     expect(parseThreadIdArgs(['16426a350b26c600', 'https://mail.google.com/mail/u/0/#inbox'])).toBeInstanceOf(Error)
+  })
+})
+
+describe('parseDraftIdArg', () => {
+  // Vectors from https://github.com/GoodMeasuresLLC/gmail_compose_encoder
+  const token = 'lLtBPXMfwdZJvWLlDhvxCqGbFRRnxnkhTqwPvxpBMCQbxPwdwWXVPRGQFfXwBlzFZRQLLvbX'
+
+  test('compose links', () => {
+    expect(
+      [
+        `https://mail.google.com/mail/u/0/#drafts?compose=${token}`,
+        `https://mail.google.com/mail/u/1/?zx=iij9apqgzdf4#inbox?compose=${token}`,
+        'https://mail.google.com/mail/u/0/#drafts?compose=CqMvqmRFntSzZfVtfBmPPsWMVrdJWrfWKgnmmQnBpjMBHZDDbfzgzMVWSNMwqsjkqbXqVSvsngB',
+      ].map(parseDraftIdArg),
+    ).toMatchInlineSnapshot(`
+      [
+        "r7186792049594056342",
+        "r7186792049594056342",
+        "r-2174453288762984534",
+      ]
+    `)
+  })
+
+  test('bare compose token', () => {
+    expect(parseDraftIdArg(token)).toBe('r7186792049594056342')
+  })
+
+  test('IDs pass through unchanged', () => {
+    expect(['r7186792049594056342', 'r-2174453288762984534', 'Drafts:42'].map(parseDraftIdArg)).toEqual([
+      'r7186792049594056342',
+      'r-2174453288762984534',
+      'Drafts:42',
+    ])
+  })
+
+  test('links without a draft ID are rejected', () => {
+    expect(
+      [
+        'https://mail.google.com/mail/u/0/#drafts?compose=16426a350b26c600',
+        'https://mail.google.com/mail/u/0/#inbox?compose=new',
+        'https://mail.google.com/mail/u/0/#inbox/FMfcgzQjgzprnprxdnvfSqhzZWCXlMJF',
+      ].map((link) => (parseDraftIdArg(link) as Error).message),
+    ).toMatchInlineSnapshot(`
+      [
+        "Invalid draft ID: Gmail link https://mail.google.com/mail/u/0/#drafts?compose=16426a350b26c600 names the draft's message, not the draft. Find the draft ID with zele draft list",
+        "Invalid draft ID: no draft in Gmail link https://mail.google.com/mail/u/0/#inbox?compose=new. Open the draft in Gmail and copy the link again",
+        "Invalid draft ID: no draft in Gmail link https://mail.google.com/mail/u/0/#inbox/FMfcgzQjgzprnprxdnvfSqhzZWCXlMJF. Open the draft in Gmail and copy the link again",
+      ]
+    `)
   })
 })
