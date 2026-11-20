@@ -21,7 +21,7 @@ import { getDb, schema } from './db.js'
 import { GmailClient } from './gmail-client.js'
 import { CalendarClient } from './calendar-client.js'
 import * as errore from 'errore'
-import { AuthError, UnsupportedError, ZeleShSignedOutError } from './api-utils.js'
+import { AuthError, NotFoundError, ThreadInManyAccountsError, UnsupportedError, ZeleShSignedOutError } from './api-utils.js'
 import { ImapSmtpClient, imapTlsOptions, tlsSocketOptions } from './imap-smtp-client.js'
 import { ZeleShApi, ZeleShClient } from './zele-sh-client.js'
 import { waitForOAuthCode, type BrowserAuthOptions } from './oauth-callback-server.js'
@@ -756,6 +756,47 @@ export async function getClient(
   throw new Error(
     `Multiple accounts matched. Specify --account:\n  ${emails}`,
   )
+}
+
+/**
+ * Find the account that holds each thread, in the order given. With --account
+ * or a single account, every thread goes to that account. Otherwise each
+ * thread is looked up in every account, since thread IDs are per mailbox.
+ */
+export async function getClientsForThreads(
+  accounts: string[] | undefined,
+  threadIds: string[],
+): Promise<Array<ClientEntry | NotFoundError | AuthError | ThreadInManyAccountsError>> {
+  const clients = await getClients(accounts)
+  return Promise.all(threadIds.map((threadId) => pickThreadClient(clients, threadId)))
+}
+
+/** Pick the one client whose mailbox has the thread. A single client is used as is. */
+export async function pickThreadClient<T extends { email: string; client: { getThread(opts: { threadId: string }): Promise<unknown> } }>(
+  clients: T[],
+  threadId: string,
+): Promise<T | NotFoundError | AuthError | ThreadInManyAccountsError> {
+  if (clients.length === 1) return clients[0]!
+
+  const results = await Promise.all(clients.map((entry) => entry.client.getThread({ threadId })))
+  const found = clients.filter((_, i) => !(results[i] instanceof Error))
+  if (found.length === 1) return found[0]!
+  if (found.length > 1) {
+    return new ThreadInManyAccountsError({ threadId, accounts: found.map((c) => c.email).join(', ') })
+  }
+  // Not found anywhere. An auth failure may be hiding it, so report that first.
+  const authError = results.find((r) => r instanceof AuthError)
+  if (authError) return authError
+  return new NotFoundError({ resource: `thread ${threadId} (searched ${clients.map((c) => c.email).join(', ')})` })
+}
+
+/** Find the account that holds one thread. See getClientsForThreads. */
+export async function getClientForThread(
+  accounts: string[] | undefined,
+  threadId: string,
+): Promise<ClientEntry | NotFoundError | AuthError | ThreadInManyAccountsError> {
+  const [entry] = await getClientsForThreads(accounts, [threadId])
+  return entry!
 }
 
 /**

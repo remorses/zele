@@ -5,7 +5,7 @@
 import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
 import * as errore from 'errore'
-import { getClient, type ClientEntry } from '../auth.js'
+import { getClient, getClientForThread, getClientsForThreads, type ClientEntry } from '../auth.js'
 import type { ParsedMessage } from '../gmail-client.js'
 import { UnsubscribeUnavailableError, UnsubscribeFailedError } from '../api-utils.js'
 import {
@@ -35,9 +35,17 @@ async function bulkAction(
   const threadIds = parseThreadIdArgs(threadIdArgs)
   if (threadIds instanceof Error) handleCommandError(threadIds)
 
-  const { client } = await getClient(accountFilter)
-  const result = await fn(client, threadIds)
-  if (result instanceof Error) handleCommandError(result)
+  // Each thread runs against the account that holds it.
+  const entries = await getClientsForThreads(accountFilter, threadIds)
+  const groups = new Map<ClientEntry, string[]>()
+  for (const [i, entry] of entries.entries()) {
+    if (entry instanceof Error) handleCommandError(entry)
+    groups.set(entry, [...(groups.get(entry) ?? []), threadIds[i]!])
+  }
+  for (const [{ client }, ids] of groups) {
+    const result = await fn(client, ids)
+    if (result instanceof Error) handleCommandError(result)
+  }
 
   out.printYaml({ action: actionName, thread_ids: threadIds, success: true })
 }
@@ -164,7 +172,9 @@ export function registerMailActionCommands(cli: ZeleCli) {
       const threadId = parseThreadIdArg(threadIdArg)
       if (threadId instanceof Error) handleCommandError(threadId)
 
-      const { client } = await getClient(options.account)
+      const entry = await getClientForThread(options.account, threadId)
+      if (entry instanceof Error) handleCommandError(entry)
+      const { client } = entry
       const threadResult = await client.getThread({ threadId })
       if (threadResult instanceof Error) handleCommandError(threadResult)
       const thread = threadResult.parsed

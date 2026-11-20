@@ -153,6 +153,12 @@ export class AmbiguousRecipientError extends errore.createTaggedError({
   message: 'Cannot infer a reply recipient for thread $threadId: no replyable external recipient was found. Pass --to <email>.',
 }) {}
 
+/** Returned when a thread ID matches a thread in more than one account. */
+export class ThreadInManyAccountsError extends errore.createTaggedError({
+  name: 'ThreadInManyAccountsError',
+  message: 'Thread $threadId exists in several accounts ($accounts). Specify --account',
+}) {}
+
 /** Returned when mail reply/send-in-thread runs against a thread whose latest
  *  non-draft message was not shown by `mail read`. Prevents agents from
  *  answering a stale view after a new reply arrives. */

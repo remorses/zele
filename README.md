@@ -157,7 +157,7 @@ zele mail watch --filter "is:unread from:alice"   # wait for a specific email
 zele mail watch --timeout 300                     # wait up to 5 minutes
 ```
 
-Every command that takes a thread ID also takes the link from Gmail's address bar, and the draft commands take an open draft's link. Pass `--account` for the mailbox the link came from.
+Every command that takes a thread ID also takes the link from Gmail's address bar, and the draft commands take an open draft's link.
 
 `mail list` defaults to **Inbox**. Use `--folder sent` for mail you sent. `is:unread` on `mail list` only matches unread Inbox threads. `mail search` looks in Inbox and Sent on IMAP, and Gmail all-mail on Google accounts.
 
@@ -345,6 +345,8 @@ zele profile                      # show account info
 ## Multi-account
 
 All commands support `--account <email>` to filter by account. Without it, commands fetch from all accounts and merge results.
+
+Commands that take a thread ID find the account that has the thread, so the IDs `mail list` prints across accounts work without `--account`.
 
 Google and IMAP/SMTP accounts work side by side — `mail list` merges results from both. Google-only features (labels, filters, calendar) show a helpful error when used with IMAP accounts.
 
