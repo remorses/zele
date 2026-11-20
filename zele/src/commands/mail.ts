@@ -16,7 +16,7 @@ import type { GmailClient } from '../gmail-client.js'
 import { AuthError, NotFoundError, UnsupportedError } from '../api-utils.js'
 import { getThreadSeenMessageId, setThreadSeenMessageId } from '../db.js'
 import { hasUnsubscribeMechanism, hasOneClickUnsubscribe } from '../unsubscribe.js'
-import { parseThreadIdArg, parseThreadIdArgs } from '../gmail-link.js'
+import { gmailThreadLink, parseThreadIdArg, parseThreadIdArgs } from '../gmail-link.js'
 import * as out from '../output.js'
 import { handleCommandError } from '../output.js'
 import { REPLY_FOLLOW_UP_HINT, replyWatchCommand } from './watch.js'
@@ -343,7 +343,7 @@ export function registerMailCommands(cli: ZeleCli) {
       const threadIds = parseThreadIdArgs(threadIdArgs)
       if (threadIds instanceof Error) handleCommandError(threadIds)
 
-      const { client, email, appId } = await getClient(options.account)
+      const { client, email, appId, accountType } = await getClient(options.account)
 
       if (options.raw && options.rawHtml) {
         out.error('--raw and --raw-html cannot be used together')
@@ -433,6 +433,7 @@ export function registerMailCommands(cli: ZeleCli) {
         const participantStr = [...participants.values()].join(', ')
         console.log(pc.dim(`${thread.messageCount} message(s) · ${participantStr}`))
         console.log(pc.dim(`ID: ${thread.id}`))
+        if (accountType === 'google') console.log(pc.dim(`Link: ${gmailThreadLink(email, thread.id)}`))
         console.log(rule + '\n')
 
         // Render each message

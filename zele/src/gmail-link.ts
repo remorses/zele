@@ -39,6 +39,34 @@ export function decodeGmailViewToken(token: string): string | undefined {
   return decoded.startsWith('thread-') ? decoded : `thread-${decoded}`
 }
 
+/** Encode a string as a Gmail view token, the inverse of decodeGmailViewToken. */
+export function encodeGmailViewToken(decoded: string): string {
+  const base64 = Buffer.from(decoded.replace(/^thread-/, ''), 'utf8').toString('base64').replace(/=+$/, '')
+
+  let n = 0n
+  for (const ch of base64) {
+    n = n * 64n + BigInt(BASE64_ALPHABET.indexOf(ch))
+  }
+
+  let token = ''
+  while (n > 0n) {
+    token = TOKEN_ALPHABET[Number(n % 40n)] + token
+    n /= 40n
+  }
+  return token
+}
+
+/** Link that opens a thread in Gmail's web UI, signed in as the given account. */
+export function gmailThreadLink(email: string, threadId: string): string {
+  return `https://mail.google.com/mail/?authuser=${encodeURIComponent(email)}#all/${threadId}`
+}
+
+/** Link that opens a draft in Gmail's compose window, signed in as the given account. */
+export function gmailDraftLink(email: string, { threadId, draftId }: { threadId: string; draftId: string }): string {
+  const token = encodeGmailViewToken(`thread-f:${BigInt(`0x${threadId}`)}+msg-a:${draftId}`)
+  return `https://mail.google.com/mail/?authuser=${encodeURIComponent(email)}#all?compose=${token}`
+}
+
 /**
  * Normalize a thread ID argument. Gmail web links and bare view tokens become
  * hex API thread IDs; anything else (hex IDs, IMAP "FOLDER:UID" IDs) is

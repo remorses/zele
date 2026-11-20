@@ -282,6 +282,8 @@ zele draft send <draft-id>
 zele draft delete <draft-id>
 ```
 
+On Google accounts, `mail read` and the draft commands print a `link` that opens the thread or draft in Gmail.
+
 ### Labels (Google only)
 
 ```bash

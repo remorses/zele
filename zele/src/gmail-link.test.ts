@@ -3,7 +3,15 @@
 // thread; all pure, no network.
 
 import { describe, expect, test } from 'vitest'
-import { decodeGmailViewToken, parseDraftIdArg, parseThreadIdArg, parseThreadIdArgs } from './gmail-link.js'
+import {
+  decodeGmailViewToken,
+  encodeGmailViewToken,
+  gmailDraftLink,
+  gmailThreadLink,
+  parseDraftIdArg,
+  parseThreadIdArg,
+  parseThreadIdArgs,
+} from './gmail-link.js'
 
 describe('decodeGmailViewToken', () => {
   test('thread-f tokens', () => {
@@ -152,5 +160,29 @@ describe('parseDraftIdArg', () => {
         "Invalid draft ID: no draft in Gmail link https://mail.google.com/mail/u/0/#inbox/FMfcgzQjgzprnprxdnvfSqhzZWCXlMJF. Open the draft in Gmail and copy the link again",
       ]
     `)
+  })
+})
+
+describe('encodeGmailViewToken', () => {
+  test('round-trips thread and compose tokens', () => {
+    for (const token of [
+      'FMfcgzQjgzprnprxdnvfSqhzZWCXlMJF',
+      'lLtBPXMfwdZJvWLlDhvxCqGbFRRnxnkhTqwPvxpBMCQbxPwdwWXVPRGQFfXwBlzFZRQLLvbX',
+      'CqMvqmRFntSzZfVtfBmPPsWMVrdJWrfWKgnmmQnBpjMBHZDDbfzgzMVWSNMwqsjkqbXqVSvsngB',
+    ]) {
+      expect(encodeGmailViewToken(decodeGmailViewToken(token)!)).toBe(token)
+    }
+  })
+})
+
+describe('Gmail links', () => {
+  test('thread link', () => {
+    expect(gmailThreadLink('me@example.com', '1a1f5b5220d25d49')).toMatchInlineSnapshot(`"https://mail.google.com/mail/?authuser=me%40example.com#all/1a1f5b5220d25d49"`)
+  })
+
+  test('draft link parses back to the draft ID', () => {
+    const link = gmailDraftLink('me@example.com', { threadId: '1661b846250a5804', draftId: 'r7186792049594056342' })
+    expect(link).toMatchInlineSnapshot(`"https://mail.google.com/mail/?authuser=me%40example.com#all?compose=lLtBPXMfwdZJvWLlDhvxCqGbFRRnxnkhTqwPvxpBMCQbxPwdwWXVPRGQFfXwBlzFZRQLLvbX"`)
+    expect(parseDraftIdArg(link)).toBe('r7186792049594056342')
   })
 })
