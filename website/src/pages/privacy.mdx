@@ -14,7 +14,7 @@ prompt: |
   @https://developers.google.com/terms/api-services-user-data-policy
 ---
 
-**Effective date:** November 19, 2026
+**Effective date:** November 20, 2026
 
 zele is an **email and calendar client that runs on your computer**. When you connect a Google account, zele talks to Google directly from your machine. Your Gmail and Google Calendar data **never passes through and is never stored on zele servers**.
 
@@ -24,21 +24,25 @@ zele also offers an optional **@zele.sh** address service, which does run on our
 
 zele is open-source software made by **Tommaso De Rossi**. The source code is public at [github.com/remorses/zele](https://github.com/remorses/zele), so you can check every claim in this policy.
 
-For privacy questions or deletion requests, email **beats.by.morse@gmail.com**.
+For privacy questions or deletion requests, email **t.de.rossi.01@gmail.com**.
 
 ## Google user data
 
 ### What zele accesses
 
-When you run `zele login`, Google asks you to allow these **scopes**:
+When you run `zele login`, Google asks you to allow a set of **scopes**. The set depends on the Google OAuth client zele logs in with: zele's own client, or the public desktop client of Mozilla Thunderbird, which zele uses by default until Google verifies zele's own client.
 
-| Scope                                            | What zele does with it                                                                                                                                                                      |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `https://mail.google.com/`                       | Lists, searches, reads, sends, replies to, forwards, drafts, labels, archives, trashes and deletes your email, manages Gmail filters, and watches for new mail when you run those commands. |
-| `https://www.googleapis.com/auth/calendar`       | Lists your calendars, reads, creates, updates and deletes events, sends RSVPs and checks free/busy times when you run calendar commands.                                                    |
-| `https://www.googleapis.com/auth/userinfo.email` | Reads your email address, so zele knows which account you signed in with and can keep several accounts apart.                                                                               |
+| Scope                                                  | Client                | What zele does with it                                                                                                                                                                   |
+| ------------------------------------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `https://www.googleapis.com/auth/gmail.modify`         | zele                  | Lists, searches, reads, sends, replies to, forwards, drafts, labels, archives, stars and trashes your email, and watches for new mail when you run those commands. It also reads your email address, so zele can keep several accounts apart. |
+| `https://www.googleapis.com/auth/gmail.settings.basic` | zele                  | Lists, creates and deletes Gmail filters when you run `zele mail filter`, and lists your send-as addresses so replies go out from the right address.                                      |
+| `https://mail.google.com/`                             | Thunderbird (default) | The same mail features as `gmail.modify`, and listing filters and send-as addresses. This scope cannot create or delete filters.                                                         |
+| `https://www.googleapis.com/auth/userinfo.email`       | Thunderbird (default) | Reads your email address, so zele can keep several accounts apart.                                                                                                                       |
+| `https://www.googleapis.com/auth/calendar`             | both                  | Lists your calendars, reads, creates, updates and deletes events, sends RSVPs and checks free/busy times when you run calendar commands.                                                 |
 
-zele is a **full email client**, so it needs the full Gmail scope. Commands like permanent delete and filter management are not covered by narrower scopes.
+zele's own client asks for the **narrowest scopes** that cover zele's features. Read-only or compose-only scopes cannot change labels, trash threads or manage filters. With either client, zele **never deletes mail permanently**. It only moves mail to the trash.
+
+zele logs in with **OAuth and PKCE**. Google sends the one-time authorization code to a temporary server on your own computer (`http://127.0.0.1`), and zele exchanges it with Google directly. zele.sh is not part of the Google login.
 
 ### How zele uses it
 
@@ -113,7 +117,7 @@ We do not use @zele.sh mail for advertising, we do not sell it, and we do not us
 
 - Mail stays until you delete it. Mail in trash is **permanently deleted after 30 days**.
 - `zele inbox delete <address>` permanently deletes that inbox and all of its mail. The address name stays reserved, so nobody else can receive your mail later.
-- To delete your whole zele.sh account, email **beats.by.morse@gmail.com** from your owner Gmail address. We delete your account, sessions, inboxes and mail.
+- To delete your whole zele.sh account, email **t.de.rossi.01@gmail.com** from your owner Gmail address. We delete your account, sessions, inboxes and mail.
 
 ### Sending
 
@@ -137,4 +141,4 @@ If this policy changes, we update this page and the effective date. Important ch
 
 ## Contact
 
-Email **beats.by.morse@gmail.com** with any question about this policy. See also the [terms of service](./terms.mdx).
+Email **t.de.rossi.01@gmail.com** with any question about this policy. See also the [terms of service](./terms.mdx).

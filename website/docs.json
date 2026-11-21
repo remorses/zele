@@ -7,6 +7,7 @@
     "light": "#0ea5e9",
     "dark": "#7dd3fc"
   },
+  "favicon": "/favicon.svg",
   "knownPaths": ["/api/*"],
   "decorativeLines": "none",
   "layout": {
