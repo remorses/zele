@@ -16,7 +16,7 @@ import type { GmailClient } from '../gmail-client.js'
 import { AuthError, NotFoundError, UnsupportedError } from '../api-utils.js'
 import { getThreadSeenMessageId, setThreadSeenMessageId } from '../db.js'
 import { hasUnsubscribeMechanism, hasOneClickUnsubscribe } from '../unsubscribe.js'
-import { parseThreadIdArg, parseThreadIdArgs } from '../gmail-link.js'
+import { gmailThreadLink, parseThreadIdArg, parseThreadIdArgs } from '../gmail-link.js'
 import { createOutput, formatDate, formatFlags, formatSender, renderEmailBody, type Output } from '../output.js'
 import { REPLY_FOLLOW_UP_HINT, replyWatchCommand } from './watch.js'
 import { colors as pc, type GokeExecutionContext } from 'goke'
@@ -395,7 +395,7 @@ export function registerMailCommands(cli: ZeleCli) {
           if (entry instanceof Error) return entry
           const thread = await entry.client.getThread({ threadId: id, skipCache: true })
           if (thread instanceof Error) return thread
-          return { ...thread, email: entry.email, appId: entry.appId }
+          return { ...thread, email: entry.email, appId: entry.appId, accountType: entry.accountType }
         }),
       )
 
@@ -426,7 +426,7 @@ export function registerMailCommands(cli: ZeleCli) {
           continue
         }
 
-        const { email, appId } = result.value
+        const { email, appId, accountType } = result.value
         const thread = result.value.parsed
 
         if (thread.messages.length === 0) {
@@ -457,6 +457,7 @@ export function registerMailCommands(cli: ZeleCli) {
         const participantStr = [...participants.values()].join(', ')
         out.log(pc.dim(`${thread.messageCount} message(s) · ${participantStr}`))
         out.log(pc.dim(`ID: ${thread.id}`))
+        if (accountType === 'google') out.log(pc.dim(`Link: ${gmailThreadLink(email, thread.id)}`))
         out.log(rule + '\n')
 
         // Render each message

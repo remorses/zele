@@ -12,9 +12,19 @@ import type { ImapSmtpClient } from '../imap-smtp-client.js'
 import { AuthError } from '../api-utils.js'
 import { downloadAttachments } from '../email-utils.js'
 import { readBodyFile, resolveAttachments } from './mail.js'
-import { parseDraftIdArg, parseThreadIdArg } from '../gmail-link.js'
+import { gmailDraftLink, parseDraftIdArg, parseThreadIdArg } from '../gmail-link.js'
 import { createOutput, formatDate, renderEmailBody, type Output } from '../output.js'
 import { colors as pc, isAgent } from 'goke'
+
+/** Gmail web link for a draft, from anything carrying its Gmail threadId. Only Google accounts have one. */
+function draftLink(
+  { email, accountType }: { email: string; accountType: string },
+  { draftId, source }: { draftId?: string | null; source?: object | null },
+): { link: string } | undefined {
+  const threadId = source && 'threadId' in source && typeof source.threadId === 'string' ? source.threadId : null
+  if (accountType !== 'google' || !draftId || !threadId) return undefined
+  return { link: gmailDraftLink(email, { threadId, draftId }) }
+}
 
 export function registerDraftCommands(cli: ZeleCli) {
   // =========================================================================
@@ -37,14 +47,14 @@ export function registerDraftCommands(cli: ZeleCli) {
 
       // Fetch from all accounts concurrently
       const results = await Promise.all(
-        clients.map(async ({ email, client }) => {
+        clients.map(async ({ email, accountType, client }) => {
           const result = await client.listDrafts({
             query: options.filter,
             maxResults: options.limit,
             pageToken: options.page,
           })
           if (result instanceof Error) return result
-          return { email, result }
+          return { email, accountType, result }
         }),
       )
 
@@ -56,8 +66,12 @@ export function registerDraftCommands(cli: ZeleCli) {
 
       // Merge drafts from all accounts, sorted by date descending, capped at limit
       const merged = allResults
-        .flatMap(({ email, result }) =>
-          result.drafts.map((d) => ({ ...d, account: email })),
+        .flatMap(({ email, accountType, result }) =>
+          result.drafts.map((d) => ({
+            ...d,
+            account: email,
+            ...draftLink({ email, accountType }, { draftId: d.id, source: d }),
+          })),
         )
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         .slice(0, options.limit)
@@ -75,6 +89,7 @@ export function registerDraftCommands(cli: ZeleCli) {
           to: d.to.join(', ') || '(no recipient)',
           subject: d.subject,
           date: formatDate(d.date),
+          ...(d.link ? { link: d.link } : {}),
         })),
         { summary: `${merged.length} draft(s)`, nextPage: allResults[0]?.result.nextPageToken },
       )
@@ -91,7 +106,8 @@ export function registerDraftCommands(cli: ZeleCli) {
       const draftId = parseDraftIdArg(draftIdArg)
       if (draftId instanceof Error) out.fail(draftId)
 
-      const { client } = await getClient(options.account)
+      const account = await getClient(options.account)
+      const { client } = account
 
       const draft = await client.getDraft({ draftId })
       if (draft instanceof Error) out.fail(draft)
@@ -101,6 +117,8 @@ export function registerDraftCommands(cli: ZeleCli) {
 
       out.log(pc.bold(`Draft: ${draft.message.subject}`))
       out.log(pc.dim(`Draft ID: ${draft.id}`))
+      const link = draftLink(account, { draftId: draft.id, source: draft.message })
+      if (link) out.log(pc.dim(`Link: ${link.link}`))
       out.log(`To: ${fmtRecipients(draft.to) || '(none)'}`)
       if (draft.cc.length > 0) {
         out.log(`Cc: ${fmtRecipients(draft.cc)}`)
@@ -151,9 +169,9 @@ export function registerDraftCommands(cli: ZeleCli) {
       const threadId = options.thread ? parseThreadIdArg(options.thread) : undefined
       if (threadId instanceof Error) out.fail(threadId)
 
-      const entry = threadId ? await getClientForThread(options.account, threadId) : await getClient(options.account)
-      if (entry instanceof Error) out.fail(entry)
-      const { client } = entry
+      const account = threadId ? await getClientForThread(options.account, threadId) : await getClient(options.account)
+      if (account instanceof Error) out.fail(account)
+      const { client } = account
 
       const result = await client.createDraft({
         to: parseEmails(options.to),
@@ -167,7 +185,7 @@ export function registerDraftCommands(cli: ZeleCli) {
       })
       if (result instanceof Error) out.fail(result)
 
-      out.printYaml(result)
+      out.printYaml({ ...result, ...draftLink(account, { draftId: result.id, source: result.message }) })
       out.success('Draft created')
     })
 
@@ -192,7 +210,8 @@ export function registerDraftCommands(cli: ZeleCli) {
 
       const newAttachments = resolveAttachments(out, options.attach) ?? []
 
-      const { client } = await getClient(options.account)
+      const account = await getClient(options.account)
+      const { client } = account
 
       // Fetch existing draft to merge unchanged fields
       const existing = await client.getDraft({ draftId })
@@ -225,7 +244,7 @@ export function registerDraftCommands(cli: ZeleCli) {
       })
       if (result instanceof Error) out.fail(result)
 
-      out.printYaml(result)
+      out.printYaml({ ...result, ...draftLink(account, { draftId: result.id, source: result.message }) })
       out.success('Draft updated')
     })
 
