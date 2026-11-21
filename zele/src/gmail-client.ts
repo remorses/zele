@@ -464,10 +464,9 @@ export class GmailClient {
     this.account = account ?? null
   }
 
-  /** MissingScopeError when the stored token grants none of `scopes`. Tokens without a scope field pass. */
-  private requireScope({ scopes, hint }: { scopes: string[]; hint: string }): MissingScopeError | null {
-    const granted = this.auth.credentials.scope?.split(' ')
-    if (!granted || scopes.some((scope) => granted.includes(scope))) return null
+  /** MissingScopeError when `granted` has none of `scopes`. */
+  private checkScopes({ granted, scopes, hint }: { granted: string[]; scopes: string[]; hint: string }): MissingScopeError | null {
+    if (scopes.some((scope) => granted.includes(scope))) return null
     return new MissingScopeError({
       email: this.account?.email ?? 'unknown',
       scope: scopes.map((scope) => scope.replace('https://www.googleapis.com/auth/', '')).join(' or '),
@@ -475,9 +474,25 @@ export class GmailClient {
     })
   }
 
+  /** Scopes of the access token. Asks Google's tokeninfo when the credentials have no scope
+   *  field (older saved tokens, or an automatic refresh whose response omitted it). */
+  private async grantedScopes(): Promise<string[] | AuthError | ApiError> {
+    const stored = this.auth.credentials.scope
+    if (stored) return stored.split(' ')
+    const info = await gmailBoundary(this.account?.email ?? 'unknown', async () => {
+      const { token } = await this.auth.getAccessToken()
+      if (!token) throw new Error('No access token to check scopes')
+      return this.auth.getTokenInfo(token)
+    })
+    if (info instanceof Error) return info
+    return info.scopes
+  }
+
   /** Filter create and delete need gmail.settings.basic, which the default Google client cannot grant. */
-  requireFilterWriteScope(): MissingScopeError | null {
-    return this.requireScope({ scopes: FILTER_WRITE_SCOPES, hint: FILTER_SCOPE_HINT })
+  async requireFilterWriteScope(): Promise<MissingScopeError | AuthError | ApiError | null> {
+    const granted = await this.grantedScopes()
+    if (granted instanceof Error) return granted
+    return this.checkScopes({ granted, scopes: FILTER_WRITE_SCOPES, hint: FILTER_SCOPE_HINT })
   }
 
   // =========================================================================
@@ -1659,7 +1674,11 @@ export class GmailClient {
   // =========================================================================
 
   async listFilters(): Promise<{ parsed: gmail_v1.Schema$Filter[] } | MissingScopeError | AuthError | ApiError> {
-    const scopeError = this.requireScope({ scopes: FILTER_READ_SCOPES, hint: 'Log in again with: zele login' })
+    // Tokens without a scope field skip the check: listing works with every scope zele ever requested.
+    const stored = this.auth.credentials.scope
+    const scopeError = stored
+      ? this.checkScopes({ granted: stored.split(' '), scopes: FILTER_READ_SCOPES, hint: 'Log in again with: zele login' })
+      : null
     if (scopeError) return scopeError
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() => this.gmail.users.settings.filters.list({ userId: 'me' })),
@@ -1686,7 +1705,7 @@ export class GmailClient {
     if (opts.addLabelIds?.length) action.addLabelIds = opts.addLabelIds
     if (opts.removeLabelIds?.length) action.removeLabelIds = opts.removeLabelIds
 
-    const scopeError = this.requireFilterWriteScope()
+    const scopeError = await this.requireFilterWriteScope()
     if (scopeError) return scopeError
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() =>
@@ -1702,7 +1721,7 @@ export class GmailClient {
   }
 
   async deleteFilter(filterId: string): Promise<void | MissingScopeError | AuthError | ApiError> {
-    const scopeError = this.requireFilterWriteScope()
+    const scopeError = await this.requireFilterWriteScope()
     if (scopeError) return scopeError
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() =>

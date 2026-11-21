@@ -72,7 +72,7 @@ export function registerFilterCommands(cli: ZeleCli) {
     .option('--to [to]', z.string().optional().describe('Match recipient'))
     .option('--subject [subject]', z.string().optional().describe('Match words in the subject'))
     .option('--query [query]', z.string().optional().describe('Match a Gmail search query, e.g. "has:attachment larger:5M"'))
-    .option('--add-label <addLabel>', z.array(z.string()).describe('Label to add, created if missing (repeatable)'))
+    .option('--add-label [addLabel]', z.string().optional().describe('Label to add, created if missing. Gmail allows one per filter'))
     .option('--remove-label <removeLabel>', z.array(z.string()).describe('Label to remove (repeatable)'))
     .option('--archive', 'Skip the inbox')
     .option('--mark-read', 'Mark as read')
@@ -84,23 +84,32 @@ export function registerFilterCommands(cli: ZeleCli) {
       if (!options.from && !options.to && !options.subject && !options.query) {
         out.fail(new ValidationError({ field: 'criteria', reason: 'pass at least one of --from, --to, --subject, --query' }))
       }
-      const addLabels = [...(options.addLabel ?? []), ...(options.star ? ['STARRED'] : [])]
       const removeLabels = [
         ...(options.removeLabel ?? []),
         ...(options.archive ? ['INBOX'] : []),
         ...(options.markRead ? ['UNREAD'] : []),
       ]
-      if (addLabels.length === 0 && removeLabels.length === 0) {
+      if (!options.addLabel && !options.star && removeLabels.length === 0) {
         out.fail(new ValidationError({ field: 'action', reason: 'pass at least one of --add-label, --remove-label, --archive, --mark-read, --star' }))
       }
 
       const { email, client } = await getGmailClient(options.account)
-      const scopeError = client.requireFilterWriteScope()
+      const scopeError = await client.requireFilterWriteScope()
       if (scopeError) out.fail(scopeError)
-      const addLabelIds = await resolveLabelIds({ client, labels: addLabels, create: true })
-      if (addLabelIds instanceof Error) out.fail(addLabelIds)
-      const removeLabelIds = await resolveLabelIds({ client, labels: removeLabels, create: false })
-      if (removeLabelIds instanceof Error) out.fail(removeLabelIds)
+      // Look up removals before creating the label to add, so a typo creates nothing.
+      const removeLabelIds: string[] = []
+      for (const label of removeLabels) {
+        const id = await client.lookupLabel(label)
+        if (id instanceof Error) out.fail(id)
+        if (id === null) out.fail(new ValidationError({ field: 'label', reason: `no label named "${label}". Run: zele label list` }))
+        removeLabelIds.push(id)
+      }
+      const addLabelIds = options.star ? ['STARRED'] : []
+      if (options.addLabel) {
+        const id = await client.resolveLabel(options.addLabel)
+        if (id instanceof Error) out.fail(id)
+        addLabelIds.push(id)
+      }
 
       const filter = await client.createFilter({
         from: options.from,
@@ -129,16 +138,4 @@ export function registerFilterCommands(cli: ZeleCli) {
       if (result instanceof Error) out.fail(result)
       out.success(`Deleted filter ${filterId} from ${email}`)
     })
-}
-
-/** Label names or ids to ids. Labels to add are created if missing; labels to remove must exist. */
-async function resolveLabelIds({ client, labels, create }: { client: GmailClient; labels: string[]; create: boolean }) {
-  const ids: string[] = []
-  for (const label of labels) {
-    const id = create ? await client.resolveLabel(label) : await client.lookupLabel(label)
-    if (id instanceof Error) return id
-    if (id === null) return new ValidationError({ field: 'label', reason: `no label named "${label}". Run: zele label list` })
-    ids.push(id)
-  }
-  return ids
 }
