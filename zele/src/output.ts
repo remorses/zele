@@ -1,8 +1,8 @@
 // Output formatting utilities for zele CLI.
 // Handles YAML output with TTY-aware coloring, date formatting,
 // HTML-to-markdown email conversion (turndown), and stderr hints.
-// Data goes to stdout (console.log), hints/progress/errors to stderr (console.error).
-// Prefer console.log/console.error over raw process.stdout/stderr when possible.
+// Commands print through createOutput(ctx), never process/console globals,
+// so the same commands work as MCP tools (`zele mcp`).
 //
 // All structured data is output as YAML (js-yaml). In TTY mode, keys are
 // colored cyan and values are left at the terminal default. In non-TTY mode,
@@ -12,8 +12,9 @@
 import yaml from 'js-yaml'
 import TurndownService from 'turndown'
 import { remark } from 'remark'
-import { colors as pc } from 'goke'
+import { colors as pc, GokeProcessExit, type GokeExecutionContext } from 'goke'
 import EmailReplyParser from 'email-reply-parser'
+import { AuthError } from './api-utils.js'
 
 // ---------------------------------------------------------------------------
 // TTY detection (used for coloring + wrapping decisions)
@@ -198,30 +199,27 @@ function colorizeYaml(yamlStr: string): string {
   )
 }
 
-/** Print any value as YAML to stdout. */
-export function printYaml(data: unknown): void {
+function renderYaml(data: unknown): string {
   const str = yaml.dump(data, {
     lineWidth: Infinity,
     noRefs: true,
     quotingType: "'",
     sortKeys: false,
   })
-
-  process.stdout.write(isTTY ? colorizeYaml(str) : str)
+  return isTTY ? colorizeYaml(str) : str
 }
 
 /**
- * Print a list of items as YAML with optional pagination and summary.
- * Output shape:
+ * List document shape:
  *   summary: "5 threads (inbox)"
  *   items:
  *     - key: value
  *   next_page: "token"
  */
-export function printList(
+function listDoc(
   items: Record<string, unknown>[],
   opts?: { nextPage?: string | null; summary?: string },
-): void {
+): Record<string, unknown> {
   const doc: Record<string, unknown> = {}
   if (opts?.summary) {
     doc.summary = opts.summary
@@ -230,7 +228,7 @@ export function printList(
   if (opts?.nextPage) {
     doc.next_page = opts.nextPage
   }
-  printYaml(doc)
+  return doc
 }
 
 // ---------------------------------------------------------------------------
@@ -342,35 +340,49 @@ export function formatFlags(item: {
 }
 
 // ---------------------------------------------------------------------------
-// Stderr hints (following gogcli pattern: data to stdout, hints to stderr)
+// Command output bound to the injected goke context
 // ---------------------------------------------------------------------------
 
-export function hint(msg: string): void {
-  console.error(pc.dim(`# ${msg}`))
+/**
+ * Printers for one command run. Everything goes through the injected goke
+ * ctx, never the process globals, so `zele mcp` can capture output as the
+ * tool result and `exit` cannot kill the MCP server.
+ * Data goes to stdout; hints, progress and errors go to stderr.
+ */
+export interface Output {
+  log(...args: unknown[]): void
+  printYaml(data: unknown): void
+  printList(items: Record<string, unknown>[], opts?: { nextPage?: string | null; summary?: string }): void
+  hint(msg: string): void
+  success(msg: string): void
+  warn(...args: unknown[]): void
+  error(msg: string): void
+  exit(code: number): never
+  /** Print a client error (AuthError gets a "Try: zele login" hint) and exit 1. */
+  fail(err: Error): never
 }
 
-export function success(msg: string): void {
-  console.error(pc.green(msg))
-}
+export function createOutput(ctx: Pick<GokeExecutionContext, 'console' | 'process'>): Output {
+  const error = (msg: string) => ctx.console.error(pc.red(msg))
 
-export function error(msg: string): void {
-  console.error(pc.red(msg))
-}
-
-// ---------------------------------------------------------------------------
-// Centralized command error handler (errore pattern)
-// ---------------------------------------------------------------------------
-
-import { AuthError } from './api-utils.js'
-
-/** Handle any error from a client method in a command context.
- *  Prints a user-friendly message to stderr and exits.
- *  AuthError gets a "Try: zele login" hint; all others print their message. */
-export function handleCommandError(err: Error): never {
-  if (err instanceof AuthError) {
-    error(`${err.message}. Try: zele login`)
-  } else {
-    error(err.message)
+  const exit = (code: number): never => {
+    ctx.process.exit(code)
+    // ctx.process.exit always throws; this only satisfies the `never` type
+    throw new GokeProcessExit(code)
   }
-  process.exit(1)
+
+  return {
+    log: ctx.console.log,
+    printYaml: (data) => ctx.process.stdout.write(renderYaml(data)),
+    printList: (items, opts) => ctx.process.stdout.write(renderYaml(listDoc(items, opts))),
+    hint: (msg) => ctx.console.error(pc.dim(`# ${msg}`)),
+    success: (msg) => ctx.console.error(pc.green(msg)),
+    warn: ctx.console.warn,
+    error,
+    exit,
+    fail: (err) => {
+      error(err instanceof AuthError ? `${err.message}. Try: zele login` : err.message)
+      return exit(1)
+    },
+  }
 }

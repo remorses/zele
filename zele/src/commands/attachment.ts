@@ -8,8 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { getClient } from '../auth.js'
 import { parseThreadIdArg } from '../gmail-link.js'
-import * as out from '../output.js'
-import { handleCommandError } from '../output.js'
+import { createOutput, type Output } from '../output.js'
 
 export function registerAttachmentCommands(cli: ZeleCli) {
   // =========================================================================
@@ -18,14 +17,15 @@ export function registerAttachmentCommands(cli: ZeleCli) {
 
   cli
     .command('attachment list <threadId>', 'List attachments for all messages in a thread')
-    .action(async (threadIdArg, options) => {
+    .action(async (threadIdArg, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const threadId = parseThreadIdArg(threadIdArg)
-      if (threadId instanceof Error) handleCommandError(threadId)
+      if (threadId instanceof Error) out.fail(threadId)
 
       const { client } = await getClient(options.account)
 
       const threadResult = await client.getThread({ threadId })
-      if (threadResult instanceof Error) handleCommandError(threadResult)
+      if (threadResult instanceof Error) out.fail(threadResult)
       const thread = threadResult.parsed
       const attachments = thread.messages.flatMap((msg) =>
         msg.attachments.map((attachment) => ({
@@ -55,15 +55,16 @@ export function registerAttachmentCommands(cli: ZeleCli) {
     .command('attachment get <messageId> <attachmentId>', 'Download an attachment')
     .option('--out-dir <outDir>', z.string().default('.').describe('Output directory'))
     .option('--filename <filename>', z.string().describe('Override filename'))
-    .action(async (messageId, attachmentId, options) => {
+    .action(async (messageId, attachmentId, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const { client } = await getClient(options.account)
 
       // Get attachment metadata first
       const msg = await client.getMessage({ messageId })
-      if (msg instanceof Error) return handleCommandError(msg)
+      if (msg instanceof Error) return out.fail(msg)
       if ('raw' in msg) {
         out.error('Cannot get attachments for raw messages')
-        process.exit(1)
+        out.exit(1)
       }
 
       const meta = msg.attachments.find((a) => a.attachmentId === attachmentId)
@@ -77,7 +78,7 @@ export function registerAttachmentCommands(cli: ZeleCli) {
       // Security: verify the resolved path is within the output directory
       if (!outPath.startsWith(outDir + path.sep) && outPath !== outDir) {
         out.error(`Security error: filename "${rawFilename}" would write outside output directory`)
-        process.exit(1)
+        out.exit(1)
       }
 
       // Check if file already exists with same size (skip re-download)
@@ -92,7 +93,7 @@ export function registerAttachmentCommands(cli: ZeleCli) {
 
       // Download
       const base64Data = await client.getAttachment({ messageId, attachmentId })
-      if (base64Data instanceof Error) return handleCommandError(base64Data)
+      if (base64Data instanceof Error) return out.fail(base64Data)
       const buffer = Buffer.from(base64Data, 'base64')
 
       // Ensure output directory exists

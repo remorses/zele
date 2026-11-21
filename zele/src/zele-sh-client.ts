@@ -305,7 +305,7 @@ export class ZeleShClient {
     return { threads: page.messages.map(toListItem), rawThreads: [], nextPageToken: page.nextCursor }
   }
 
-  async getThread({ threadId }: { threadId: string; skipCache?: boolean }): Promise<ThreadResult | ClientFail> {
+  async getThread({ threadId }: { threadId: string; skipCache?: boolean; headersOnly?: boolean }): Promise<ThreadResult | ClientFail> {
     const message = await this.getMessage({ messageId: threadId })
     if (message instanceof Error) return message
     return {

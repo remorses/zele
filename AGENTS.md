@@ -6,9 +6,21 @@ the TUI (the root command) is only supported in bun. our bin file tries to use b
 
 - `zele/src/cli.ts` registers command modules; commands own CLI input/output.
 - Mail clients (`gmail-client.ts`, `imap-smtp-client.ts`) own provider API calls, caching and watch cursors. Gmail watch reads a live history cursor, never the 24-hour profile cache.
+- Gmail quota: new Google projects get 6,000 units per minute per user (threads.get full costs 120, metadata 40). `GmailClient.fetchThread` reuses cached message payloads (they never change) and fetches only metadata plus new messages. Invalidation keeps rows and clears historyId. Label changes use `threads.modify` (10 units). See https://developers.google.com/workspace/gmail/api/reference/quota
 - `zele/src/db.ts` owns the SQLite connection; `schema.ts` and `schema.sql` define storage.
 - Root `README.md` and `skills/zele/SKILL.md` are the source docs. Copies in `zele/` are generated.
 - `mail watch` only waits and prints a candidate. Backgrounding, reply validation and send approval are the agent's job (see the skill).
+- Browser login (Google and Microsoft): `waitForOAuthCode` in `oauth-callback-server.ts` listens on `127.0.0.1` on a random port, sends a random `state`, and checks it in the loopback callback and in a pasted redirect URL. Every login uses PKCE S256 (`createPkce`). zele.sh is not involved.
+- Google clients: `OAUTH_CLIENTS` in `auth.ts`, all Desktop app clients with embedded secrets. `ZELE_GOOGLE_CLIENT` picks one (default thunderbird). A Google login deletes other Google `Account` rows of the same email, so one email is one account. Filter writes need `gmail.settings.basic`, which only the unverified `zele` client grants; `GmailClient` checks the stored token `scope` before the call. See `docs/google-oauth-verification.md`.
+- `zele mcp` uses `createMcpAction` from `@goke/mcp`: every command is a stdio MCP tool, except the ones in `MCP_EXCLUDED_COMMANDS` in `cli.ts`. goke runs the action with a capturing ctx, so the tool result is what the command printed.
+
+## command output
+
+commands print only through the injected goke ctx: `const out: Output = createOutput(ctx)` at the top of each action, then `out.printYaml`, `out.hint`, `out.log`, `out.exit`, `out.fail`. pass `out` as the first argument to helpers that print.
+
+never use `console.*`, `process.stdout` or `process.exit` in command files. in `zele mcp` stdout is the JSON-RPC channel and `process.exit` kills the server. `ctx.process.exit` throws instead, and goke turns it into an error tool result.
+
+keep the `: Output` annotation: TypeScript only narrows after `out.fail(x)` (a `never` call) when `out` has an explicit type.
 
 ## development
 
@@ -81,11 +93,11 @@ read the errore best practices and skill before writing any error handling code:
 - **use `errore.tryAsync({ try, catch })`** at the boundary layer (googleapis, tsdav) to convert throws into typed error values. see the `gmailBoundary()` and `caldavBoundary()` helpers in the client files.
 - **use `errore.tryFn()`** for synchronous boundary calls (e.g. JSON.parse, iCal parsing).
 - **return errors as values** from client methods. use `return new AuthError(...)` not `throw new AuthError(...)`.
-- **check with instanceof** at the call site: `if (result instanceof Error) handleCommandError(result)`.
+- **check with instanceof** at the call site: `if (result instanceof Error) out.fail(result)`.
 - **use `instanceof Error`** (base class) when you want to catch any domain error. use `instanceof AuthError` etc. when you need specific handling.
 - **use `errore.unwrap()`** at entry points where failure is fatal (login, migration).
 - **define tagged error classes** in `zele/src/api-utils.ts` using `errore.createTaggedError()` with `$variable` interpolation.
-- **use `handleCommandError()`** from `zele/src/output.ts` in command files instead of manual `out.error()` + `process.exit(1)`.
+- **use `out.fail(err)`** in command files instead of manual `out.error()` + `out.exit(1)`. `out` comes from `createOutput(ctx)` (see "command output" above).
 - **never string-match error messages**. use instanceof narrowing instead. the only exception is `isAuthLikeError()` which translates external library exceptions at the boundary.
 
 ### errore.try is only for external code
@@ -168,7 +180,7 @@ write error handling in a flat, go-like, non-nested style. check errors early an
 ```typescript
 // good: flat, early return
 const result = await client.getEvent({ calendarId, eventId })
-if (result instanceof Error) handleCommandError(result)
+if (result instanceof Error) out.fail(result)
 // continue with result...
 
 // bad: nested

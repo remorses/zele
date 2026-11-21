@@ -1,13 +1,11 @@
 // Microsoft OAuth helpers used for Outlook IMAP XOAUTH2.
 // No network. Token parsing uses a hand-built JWT payload.
 
-import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'vitest'
 import {
   MICROSOFT_CLIENT_ID,
   MICROSOFT_SCOPES,
   buildMicrosoftAuthUrl,
-  createPkce,
   emailFromIdToken,
   resolveMicrosoftAccountEmail,
   tokensFromResponse,
@@ -17,21 +15,13 @@ function b64url(json: object) {
   return Buffer.from(JSON.stringify(json)).toString('base64url')
 }
 
-describe('createPkce', () => {
-  test('verifier is S256 of challenge', () => {
-    const { verifier, challenge } = createPkce()
-    expect(verifier.length).toBeGreaterThanOrEqual(43)
-    const expected = createHash('sha256').update(verifier).digest('base64url')
-    expect(challenge).toBe(expected)
-  })
-})
-
 describe('buildMicrosoftAuthUrl', () => {
-  test('includes Thunderbird client, IMAP SMTP scopes, and PKCE', () => {
+  test('includes Thunderbird client, IMAP SMTP scopes, state and PKCE', () => {
     const url = new URL(
       buildMicrosoftAuthUrl({
         challenge: 'abc',
-        redirectUri: 'http://localhost:8089',
+        redirectUri: 'http://127.0.0.1:53682',
+        state: 'state-123',
         loginHint: 'atrox@outlook.it',
       }),
     )
@@ -39,7 +29,8 @@ describe('buildMicrosoftAuthUrl', () => {
     expect(url.searchParams.get('client_id')).toBe(MICROSOFT_CLIENT_ID)
     expect(url.searchParams.get('code_challenge')).toBe('abc')
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
-    expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:8089')
+    expect(url.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:53682')
+    expect(url.searchParams.get('state')).toBe('state-123')
     expect(url.searchParams.get('login_hint')).toBe('atrox@outlook.it')
     const scope = url.searchParams.get('scope') ?? ''
     for (const item of MICROSOFT_SCOPES) {

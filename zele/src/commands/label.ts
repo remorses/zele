@@ -10,8 +10,7 @@ import * as clack from '@clack/prompts'
 import { getClients, getGmailClient } from '../auth.js'
 import { AuthError, UnsupportedError } from '../api-utils.js'
 import type { GmailClient } from '../gmail-client.js'
-import * as out from '../output.js'
-import { handleCommandError } from '../output.js'
+import { createOutput, type Output } from '../output.js'
 
 export function registerLabelCommands(cli: ZeleCli) {
   // =========================================================================
@@ -20,12 +19,13 @@ export function registerLabelCommands(cli: ZeleCli) {
 
   cli
     .command('label list', 'List all labels')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const clients = await getClients(options.account)
       // Labels are Google-only — filter to Google accounts
       const googleClients = clients.filter((c) => c.accountType === 'google')
       if (googleClients.length === 0) {
-        handleCommandError(new UnsupportedError({ feature: 'Labels', accountType: 'IMAP/SMTP and zele.sh', hint: 'Use --folder to browse different mailboxes.' }))
+        out.fail(new UnsupportedError({ feature: 'Labels', accountType: 'IMAP/SMTP and zele.sh', hint: 'Use --folder to browse different mailboxes.' }))
       }
 
       // Fetch from all Google accounts concurrently
@@ -77,7 +77,8 @@ export function registerLabelCommands(cli: ZeleCli) {
 
   cli
     .command('label get <labelId>', 'Get label details with counts')
-    .action(async (labelId, options) => {
+    .action(async (labelId, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const { client } = await getGmailClient(options.account)
 
       const label = await client.getLabel({ labelId })
@@ -101,7 +102,8 @@ export function registerLabelCommands(cli: ZeleCli) {
     .command('label create <name>', 'Create a new label')
     .option('--bg-color <bgColor>', z.string().describe('Background color (hex, e.g. #4986e7)'))
     .option('--text-color <textColor>', z.string().describe('Text color (hex, e.g. #ffffff)'))
-    .action(async (name, options) => {
+    .action(async (name, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const { client } = await getGmailClient(options.account)
 
       const result = await client.createLabel({
@@ -121,11 +123,12 @@ export function registerLabelCommands(cli: ZeleCli) {
 
   cli
     .command('label rename <labelId> <name>', 'Rename a label (keeps its ID and thread assignments)')
-    .action(async (labelId, name, options) => {
+    .action(async (labelId, name, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const { client } = await getGmailClient(options.account)
 
       const result = await client.renameLabel({ labelId, name })
-      if (result instanceof Error) handleCommandError(result)
+      if (result instanceof Error) out.fail(result)
 
       out.printYaml(result)
       out.success(`Label renamed: "${result.name}"`)
@@ -138,11 +141,12 @@ export function registerLabelCommands(cli: ZeleCli) {
   cli
     .command('label delete <labelId>', 'Delete a label')
     .option('--force', 'Skip confirmation')
-    .action(async (labelId, options) => {
+    .action(async (labelId, options, ctx) => {
+      const out: Output = createOutput(ctx)
       if (!options.force) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Use --force to delete non-interactively')
-          process.exit(1)
+          out.exit(1)
         }
 
         const confirmed = await clack.confirm({
@@ -168,11 +172,12 @@ export function registerLabelCommands(cli: ZeleCli) {
 
   cli
     .command('label counts', 'Show unread counts per label')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const clients = await getClients(options.account)
       const googleClients = clients.filter((c) => c.accountType === 'google')
       if (googleClients.length === 0) {
-        handleCommandError(new UnsupportedError({ feature: 'Label counts', accountType: 'IMAP/SMTP and zele.sh', hint: 'They use folders, not labels.' }))
+        out.fail(new UnsupportedError({ feature: 'Label counts', accountType: 'IMAP/SMTP and zele.sh', hint: 'They use folders, not labels.' }))
       }
 
       // Fetch from all Google accounts concurrently

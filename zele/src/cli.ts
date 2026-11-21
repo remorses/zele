@@ -26,8 +26,16 @@ import { registerCalendarCommands } from './commands/calendar.js'
 import { registerWatchCommands } from './commands/watch.js'
 import { registerFilterCommands } from './commands/filter.js'
 import { registerInboxCommands } from './commands/inbox.js'
-import { handleCommandError } from './output.js'
+import { createMcpAction } from '@goke/mcp'
+import { createOutput } from './output.js'
 import { closeDb } from './db.js'
+
+const require = createRequire(import.meta.url)
+const { version } = require('../package.json')
+
+// Not exposed as MCP tools: interactive auth flows, shell setup, and the
+// long-running `mail watch` (agents run it in a background shell instead).
+const MCP_EXCLUDED_COMMANDS = /^(login|logout|completions|mail watch)\b/
 
 const cli: ZeleCli = goke('zele').option(
   '--account [account]',
@@ -38,7 +46,7 @@ const cli: ZeleCli = goke('zele').option(
 // Default command (TUI)
 // ---------------------------------------------------------------------------
 
-cli.command('', 'Browse emails in TUI').action(async () => {
+cli.command('', 'Browse emails in TUI').action(async (_options, ctx) => {
   // TODO: Remove bun re-spawn when opentui supports Node.js natively.
   // OpenTUI's Zig renderer requires Bun FFI. When running under Node,
   // re-spawn the same command with bun so the TUI works transparently.
@@ -80,7 +88,7 @@ cli.command('', 'Browse emails in TUI').action(async () => {
   const accounts = await listAccounts()
   if (accounts.length === 0) {
     const result = await login()
-    if (result instanceof Error) handleCommandError(result)
+    if (result instanceof Error) createOutput(ctx).fail(result)
   }
   const termcastMod = await import('termcast')
   const mailTuiMod = await import('./mail-tui.js')
@@ -107,14 +115,26 @@ registerCalendarCommands(cli)
 registerWatchCommands(cli)
 registerFilterCommands(cli)
 
+cli
+  .command(
+    'mcp',
+    'Start an MCP server over stdio. Every zele command becomes a tool, except login, logout, completions and mail watch',
+  )
+  .example('claude mcp add zele -- zele mcp')
+  .action(
+    createMcpAction({
+      cli,
+      serverVersion: version,
+      commandFilter: (name) => !MCP_EXCLUDED_COMMANDS.test(name),
+    }),
+  )
+
 // ---------------------------------------------------------------------------
 // Help & version
 // ---------------------------------------------------------------------------
 
 cli.help()
 cli.completions()
-const require = createRequire(import.meta.url)
-const { version } = require('../package.json')
 cli.version(version)
 
 // ---------------------------------------------------------------------------

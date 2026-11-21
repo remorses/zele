@@ -254,7 +254,7 @@ function AddAccount({
     if (isLoggingIn) return
 
     setIsLoggingIn(true)
-    const result = await login(undefined, {
+    const result = await login({
       openBrowser: true,
       allowManualCodeEntry: false,
       showInstructions: false,
@@ -287,7 +287,7 @@ function AddAccount({
         `# Add Account\n\n` +
         `The browser opens automatically for Google sign-in.\n\n` +
         `Complete login in the browser, then come back here. ` +
-        `This screen waits for the localhost callback and will finish automatically.`
+        `This screen waits for the browser login and will finish automatically.`
       }
       actions={
         <ActionPanel>

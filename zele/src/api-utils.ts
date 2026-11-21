@@ -58,15 +58,21 @@ export async function mapConcurrent<T, R>(
   return results
 }
 
-/** Simple retry for rate limit errors (429 and 403 quota errors).
- *  Matches Zero's gmail-rate-limit.ts schedule: up to 10 attempts, 60s base delay. */
-export async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 10, delayMs = 60000): Promise<T> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+const RETRY_MAX_ATTEMPTS = 5
+const RETRY_BASE_DELAY_MS = 2000
+
+/** Retry rate limit errors with exponential backoff (2s, 4s, 8s, 16s; 30s worst case).
+ *  Idempotent calls also retry Gmail `backendError`. Non-idempotent calls (sends)
+ *  must pass `idempotent: false`: a backend error may come after the mail was
+ *  already sent, so only rate limits, which reject the request up front, are retried. */
+export async function withRetry<T>(fn: () => Promise<T>, { idempotent = true }: { idempotent?: boolean } = {}): Promise<T> {
+  for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
     try {
       return await fn()
     } catch (err: any) {
-      if (!isRateLimitError(err) || attempt === maxAttempts) throw err
-      const wait = delayMs * Math.pow(2, attempt - 1)
+      const retryable = isRateLimitError(err) || (idempotent && isBackendError(err))
+      if (!retryable || attempt === RETRY_MAX_ATTEMPTS) throw err
+      const wait = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
       await new Promise((r) => setTimeout(r, wait))
     }
   }
@@ -84,12 +90,18 @@ export class AuthError extends errore.createTaggedError({
   message: 'Authentication failed for $email: $reason',
 }) {}
 
-/** Returned when a requested resource doesn't exist (calendar, event, thread, draft, label). */
+/** Returned before a Gmail call when the stored token does not grant a scope the call needs. */
+export class MissingScopeError extends errore.createTaggedError({
+  name: 'MissingScopeError',
+  message: '$email has not granted the $scope scope. $hint',
+}) {}
+
 export class ZeleShSignedOutError extends errore.createTaggedError({
   name: 'ZeleShSignedOutError',
   message: 'Not signed in to $apiUrl. Run: zele login zele',
 }) {}
 
+/** Returned when a requested resource doesn't exist (calendar, event, thread, draft, label). */
 export class NotFoundError extends errore.createTaggedError({
   name: 'NotFoundError',
   message: '$resource not found',
@@ -183,16 +195,9 @@ export function isAuthLikeError(err: unknown): boolean {
   const e = err as any
   const status = e?.code ?? e?.status ?? e?.response?.status
   if (status === 401) return true
-  if (status === 403 && !isRateLimitError(e)) return true
+  if (status === 403 && !isRateLimitError(e) && !isBackendError(e)) return true
   const msg = String(err)
   return msg.includes('Invalid credentials') || msg.includes('Unauthorized') || msg.includes('invalid_grant')
-}
-
-/** Check if an error is specifically about missing OAuth scopes (not expired tokens or revoked access).
- *  When true, the user needs to `zele login` again to grant the new scope. */
-export function isScopeError(err: unknown): boolean {
-  const msg = String(err)
-  return msg.includes('insufficient authentication scopes') || msg.includes('Insufficient Permission')
 }
 
 
@@ -200,23 +205,30 @@ export function isScopeError(err: unknown): boolean {
 // Rate limit detection
 // ---------------------------------------------------------------------------
 
+const RATE_LIMIT_REASONS = [
+  'userRateLimitExceeded',
+  'rateLimitExceeded',
+  'quotaExceeded',
+  'dailyLimitExceeded',
+  'limitExceeded',
+]
+
+function googleErrorReasons(err: any): string[] {
+  const errors = err?.errors ?? err?.response?.data?.error?.errors ?? []
+  return errors.map((e: any) => e?.reason)
+}
+
+/** 429 or 403 quota errors. Google rejects these before doing any work, so retrying is safe even for sends. */
 export function isRateLimitError(err: any): boolean {
   const status = err?.code ?? err?.status ?? err?.response?.status
   if (status === 429) return true
-  if (status === 403) {
-    const errors = err?.errors ?? err?.response?.data?.error?.errors ?? []
-    return errors.some((e: any) =>
-      [
-        'userRateLimitExceeded',
-        'rateLimitExceeded',
-        'quotaExceeded',
-        'dailyLimitExceeded',
-        'limitExceeded',
-        'backendError',
-      ].includes(e.reason),
-    )
-  }
+  if (status === 403) return googleErrorReasons(err).some((r) => RATE_LIMIT_REASONS.includes(r))
   return false
+}
+
+/** Google server error. The request may have been applied, so only idempotent calls should retry it. */
+export function isBackendError(err: any): boolean {
+  return googleErrorReasons(err).includes('backendError')
 }
 
 /** Sleep that resolves immediately when an AbortSignal fires.

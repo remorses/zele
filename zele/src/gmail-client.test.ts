@@ -555,3 +555,19 @@ describe('threadMatchesListQuery', () => {
     expect(threadMatchesListQuery(readSent, 'is:unread OR is:starred')).toBe(true)
   })
 })
+
+test('send is not retried on a backend error, since the mail may already be sent', async () => {
+  const c = new GmailClient({ auth: new OAuth2Client() })
+  const backendError = Object.assign(new Error('Backend Error'), {
+    code: 403,
+    errors: [{ reason: 'backendError' }],
+  })
+  const send = vi.fn(async () => {
+    throw backendError
+  })
+  ;(c as any).gmail = { users: { messages: { send } } }
+  const res = await c.sendMessage({ to: [{ email: 'a@example.test' }], subject: 's', body: 'b' })
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(res).toBeInstanceOf(Error)
+  expect((res as Error).name).toBe('ApiError')
+})

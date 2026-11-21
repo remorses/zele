@@ -1,0 +1,652 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "3e51ba1f-7454-4444-b078-e6b8fdec62c7",
+  "prevIds": [
+    "034c2291-aa89-45c2-ac98-f55fd6d24b7d"
+  ],
+  "ddl": [
+    {
+      "name": "account",
+      "entityType": "tables"
+    },
+    {
+      "name": "inbox",
+      "entityType": "tables"
+    },
+    {
+      "name": "oauth_handoff",
+      "entityType": "tables"
+    },
+    {
+      "name": "session",
+      "entityType": "tables"
+    },
+    {
+      "name": "user",
+      "entityType": "tables"
+    },
+    {
+      "name": "verification",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "account_id",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "provider_id",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "access_token",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "refresh_token",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "access_token_expires_at",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "refresh_token_expires_at",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id_token",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "password",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "account"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "address",
+      "entityType": "columns",
+      "table": "inbox"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "inbox"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'active'",
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "inbox"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "inbox"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "deleted_at",
+      "entityType": "columns",
+      "table": "inbox"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state_hash",
+      "entityType": "columns",
+      "table": "oauth_handoff"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "code",
+      "entityType": "columns",
+      "table": "oauth_handoff"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "oauth_handoff"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "oauth_handoff"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ip_address",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_agent",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "user"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "user"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "email",
+      "entityType": "columns",
+      "table": "user"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "email_verified",
+      "entityType": "columns",
+      "table": "user"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "image",
+      "entityType": "columns",
+      "table": "user"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "user"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "user"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "verification"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "identifier",
+      "entityType": "columns",
+      "table": "verification"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "value",
+      "entityType": "columns",
+      "table": "verification"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "verification"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "verification"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "verification"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "user",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_account_user_id_user_id_fk",
+      "entityType": "fks",
+      "table": "account"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "user",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_inbox_user_id_user_id_fk",
+      "entityType": "fks",
+      "table": "inbox"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "user",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_session_user_id_user_id_fk",
+      "entityType": "fks",
+      "table": "session"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "account_pk",
+      "table": "account",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "address"
+      ],
+      "nameExplicit": false,
+      "name": "inbox_pk",
+      "table": "inbox",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "state_hash"
+      ],
+      "nameExplicit": false,
+      "name": "oauth_handoff_pk",
+      "table": "oauth_handoff",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "session_pk",
+      "table": "session",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "user_pk",
+      "table": "user",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "verification_pk",
+      "table": "verification",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "account_user_id_idx",
+      "entityType": "indexes",
+      "table": "account"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "inbox_user_id_idx",
+      "entityType": "indexes",
+      "table": "inbox"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "oauth_handoff_expires_at_idx",
+      "entityType": "indexes",
+      "table": "oauth_handoff"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "session_user_id_idx",
+      "entityType": "indexes",
+      "table": "session"
+    },
+    {
+      "columns": [
+        {
+          "value": "identifier",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "verification_identifier_idx",
+      "entityType": "indexes",
+      "table": "verification"
+    },
+    {
+      "columns": [
+        "token"
+      ],
+      "nameExplicit": false,
+      "name": "session_token_unique",
+      "entityType": "uniques",
+      "table": "session"
+    },
+    {
+      "columns": [
+        "email"
+      ],
+      "nameExplicit": false,
+      "name": "user_email_unique",
+      "entityType": "uniques",
+      "table": "user"
+    }
+  ],
+  "renames": []
+}
