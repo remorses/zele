@@ -13,9 +13,7 @@ import { runZeleLogin } from './inbox.js'
 import { resolveZeleApiUrl } from '../zele-sh-client.js'
 import { closeDb } from '../db.js'
 import { createOutput, type Output } from '../output.js'
-import type { BrowserAuthOptions } from '../oauth-callback-server.js'
-
-const LOGIN_TIMEOUT_MS = 10 * 60 * 1000
+import { LOGIN_TIMEOUT_MS, type BrowserAuthOptions } from '../oauth-callback-server.js'
 
 async function runBrowserOAuth(
   ctx: GokeExecutionContext,
@@ -111,7 +109,7 @@ export function registerAuthCommands(cli: ZeleCli) {
         return
       }
 
-      await runBrowserOAuth(ctx, (authOptions) => login(undefined, authOptions))
+      await runBrowserOAuth(ctx, (authOptions) => login(authOptions))
     })
 
   cli

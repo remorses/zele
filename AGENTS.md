@@ -10,6 +10,8 @@ the TUI (the root command) is only supported in bun. our bin file tries to use b
 - `zele/src/db.ts` owns the SQLite connection; `schema.ts` and `schema.sql` define storage.
 - Root `README.md` and `skills/zele/SKILL.md` are the source docs. Copies in `zele/` are generated.
 - `mail watch` only waits and prints a candidate. Backgrounding, reply validation and send approval are the agent's job (see the skill).
+- Browser login (Google and Microsoft): `waitForOAuthCode` in `oauth-callback-server.ts` listens on `127.0.0.1` on a random port, sends a random `state`, and checks it in the loopback callback and in a pasted redirect URL. Every login uses PKCE S256 (`createPkce`). zele.sh is not involved.
+- Google clients: `OAUTH_CLIENTS` in `auth.ts`, all Desktop app clients with embedded secrets. `ZELE_GOOGLE_CLIENT` picks one (default thunderbird). A Google login deletes other Google `Account` rows of the same email, so one email is one account. Filter writes need `gmail.settings.basic`, which only the unverified `zele` client grants; `GmailClient` checks the stored token `scope` before the call. See `docs/google-oauth-verification.md`.
 - `zele mcp` uses `createMcpAction` from `@goke/mcp`: every command is a stdio MCP tool, except the ones in `MCP_EXCLUDED_COMMANDS` in `cli.ts`. goke runs the action with a capturing ctx, so the tool result is what the command printed.
 
 ## command output

@@ -1,11 +1,18 @@
-// Localhost OAuth callback server shared by Google and Microsoft login.
-// Prints the authorize URL, opens a browser, and waits for ?code= on localhost.
+// Browser OAuth for Google and Microsoft login (RFC 8252 loopback redirect).
+// Listens on 127.0.0.1 on a random port, prints and opens the authorize URL, and
+// waits for ?code=&state= on the loopback server or a pasted redirect URL.
 
 import http from 'node:http'
 import readline from 'node:readline'
-import fkill from 'fkill'
+import { createHash, randomBytes } from 'node:crypto'
 import { colors as pc, openInBrowser } from 'goke'
 import * as errore from 'errore'
+
+/** Browser logins give up after this. Also the timeout of the background login daemon. */
+export const LOGIN_TIMEOUT_MS = 10 * 60 * 1000
+
+/** Google and Microsoft desktop clients accept any port on this loopback address. */
+const LOOPBACK_HOST = '127.0.0.1'
 
 export interface BrowserAuthOptions {
   openBrowser?: boolean
@@ -14,21 +21,23 @@ export interface BrowserAuthOptions {
   onAuthorizationUrl?: (url: string) => void
 }
 
-export function extractCodeFromInput(input: string): string | null {
-  const trimmed = input.trim()
-  if (!trimmed) return null
+/** PKCE S256 pair (RFC 7636). The verifier never leaves this process. */
+export function createPkce(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(32).toString('base64url')
+  const challenge = createHash('sha256').update(verifier).digest('base64url')
+  return { verifier, challenge }
+}
 
-  const url = errore.tryFn(() => new URL(trimmed))
-  if (!(url instanceof Error)) {
-    const code = url.searchParams.get('code')
-    if (code) return code
-  }
-
-  if (trimmed.length > 10 && !trimmed.includes(' ')) {
-    return trimmed
-  }
-
-  return null
+/** Authorization code from a pasted redirect URL. Rejects URLs from another login (state mismatch). */
+export function codeFromRedirectUrl({ input, state }: { input: string; state: string }): string | Error {
+  const url = errore.tryFn(() => new URL(input.trim()))
+  if (url instanceof Error) return new Error('Paste the full redirect URL from the browser address bar.')
+  if (url.searchParams.get('state') !== state) return new Error('This URL is from another login attempt (state does not match).')
+  const error = url.searchParams.get('error')
+  if (error) return new Error(`Authorization failed: ${url.searchParams.get('error_description') ?? error}`)
+  const code = url.searchParams.get('code')
+  if (!code) return new Error('This URL has no authorization code.')
+  return code
 }
 
 function escapeHtml(text: string): string {
@@ -201,67 +210,103 @@ function authCallbackHtml(options: {
 }
 
 export async function waitForOAuthCode(opts: {
-  authUrl: string
-  port: number
+  /** Builds the authorize URL. Must send `state` and redirect to `redirectUri`. */
+  buildAuthUrl: (params: { redirectUri: string; state: string }) => string
   loginCommand: string
   provider: string
   openBrowser?: boolean
   allowManualCodeEntry?: boolean
   showInstructions?: boolean
   onAuthorizationUrl?: (url: string) => void
-}): Promise<string | Error> {
-  const openBrowser = opts.openBrowser ?? true
+}): Promise<{ code: string; redirectUri: string } | Error> {
   const allowManualCodeEntry = opts.allowManualCodeEntry ?? true
   const showInstructions = opts.showInstructions ?? true
+  const state = randomBytes(32).toString('base64url')
 
-  await fkill(`:${opts.port}`, { force: true, silent: true }).catch(() => {})
-  opts.onAuthorizationUrl?.(opts.authUrl)
+  const server = http.createServer()
+  const listenError = await new Promise<Error | null>((resolve) => {
+    server.once('error', (err) => resolve(new Error(`Failed to start local auth callback server on ${LOOPBACK_HOST}`, { cause: err })))
+    server.listen(0, LOOPBACK_HOST, () => resolve(null))
+  })
+  if (listenError) return listenError
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    server.close()
+    return new Error('Local auth callback server has no TCP port')
+  }
+  const redirectUri = `http://${LOOPBACK_HOST}:${address.port}`
+  const authUrl = opts.buildAuthUrl({ redirectUri, state })
 
+  opts.onAuthorizationUrl?.(authUrl)
   if (showInstructions) {
     console.error('\n' + pc.bold('1.') + ' Open this URL to authorize:\n')
-    console.error('   ' + pc.cyan(pc.underline(opts.authUrl)) + '\n')
+    console.error('   ' + pc.cyan(pc.underline(authUrl)) + '\n')
     console.error(pc.bold('2.') + ' If running locally, the browser will redirect automatically.')
     console.error(pc.dim('   If running remotely, the redirect page won\'t load — that\'s fine.'))
     console.error(pc.dim('   Just copy the URL from your browser\'s address bar and paste it below.') + '\n')
   }
 
-  if (openBrowser) await openInBrowser(opts.authUrl)
-
-  return new Promise((resolve) => {
+  const result = new Promise<string | Error>((resolve) => {
     let resolved = false
-    let server: http.Server | null = null
     let rl: readline.Interface | null = null
+    const timer = setTimeout(
+      () => done(new Error(`Login was not finished within ${LOGIN_TIMEOUT_MS / 60_000} minutes. Run: ${opts.loginCommand}`)),
+      LOGIN_TIMEOUT_MS,
+    )
 
-    function closeServer() {
-      if (server) {
-        server.closeAllConnections()
-        server.close()
-      }
-    }
-
-    function finish(code: string) {
+    function done(value: string | Error) {
       if (resolved) return
       resolved = true
-      closeServer()
+      clearTimeout(timer)
+      server.closeAllConnections()
+      server.close()
       if (rl) {
         rl.close()
         process.stdin.unref()
       }
-      resolve(code)
+      resolve(value)
     }
 
-    function fail(err: Error) {
-      if (resolved) return
-      resolved = true
-      closeServer()
-      rl?.close()
-      resolve(err)
-    }
-
-    server = http.createServer((req, res) => {
-      const url = new URL(req.url!, `http://localhost:${opts.port}`)
+    server.on('error', (err) => done(new Error('Local auth callback server failed', { cause: err })))
+    server.on('request', (req, res) => {
+      const url = new URL(req.url ?? '/', redirectUri)
       const code = url.searchParams.get('code')
       const error = url.searchParams.get('error')
+
+      if (!code && !error) {
+        res.writeHead(400, { 'Content-Type': 'text/html' })
+        res.end(
+          authCallbackHtml({
+            title: 'No authorization code received',
+            message: 'This page was opened without the OAuth "code" parameter.',
+            status: 'neutral',
+            sectionTitle: 'What to do',
+            commands: [
+              { comment: 'Restart login and try again', command: opts.loginCommand },
+              {
+                comment: 'If the browser can’t reach this computer, that’s fine',
+                command: '# Copy the redirect URL from the address bar and paste it into the terminal',
+              },
+            ],
+          }),
+        )
+        return
+      }
+
+      // A redirect from another login attempt or another site: ignore it and keep waiting.
+      if (url.searchParams.get('state') !== state) {
+        res.writeHead(400, { 'Content-Type': 'text/html' })
+        res.end(
+          authCallbackHtml({
+            title: 'Login request does not match',
+            message: 'This redirect belongs to another login attempt. Use the URL printed by the running login.',
+            status: 'error',
+            sectionTitle: 'Try again',
+            commands: [{ comment: 'Start login again', command: opts.loginCommand }],
+          }),
+        )
+        return
+      }
 
       if (error) {
         res.writeHead(400, { 'Content-Type': 'text/html' })
@@ -271,72 +316,50 @@ export async function waitForOAuthCode(opts: {
             message: `${opts.provider} returned: ${error}`,
             status: 'error',
             sectionTitle: 'Try again',
-            commands: [
-              { comment: 'Start login again', command: opts.loginCommand },
-              {
-                comment: 'If running remotely, copy the full redirect URL',
-                command: '# ...and paste it into the terminal prompt',
-              },
-            ],
+            commands: [{ comment: 'Start login again', command: opts.loginCommand }],
           }),
         )
-        fail(new Error(url.searchParams.get('error_description') ?? error))
+        done(new Error(`${opts.provider} login failed: ${url.searchParams.get('error_description') ?? error}. Run: ${opts.loginCommand}`))
         return
       }
 
-      if (code) {
-        res.writeHead(200, { 'Content-Type': 'text/html' })
-        res.end(
-          authCallbackHtml({
-            title: 'Login complete',
-            message: 'You can close this tab and go back to the terminal.',
-            status: 'success',
-            sectionTitle: 'Next steps',
-            commands: [
-              { comment: 'Plan: open the TUI to read your emails', command: 'zele' },
-              { comment: 'Plan: list your latest threads', command: 'zele mail list' },
-              { comment: 'Plan: search mail', command: 'zele mail search "from:github"' },
-            ],
-          }),
-        )
-        finish(code)
-        return
-      }
-
-      res.writeHead(400, { 'Content-Type': 'text/html' })
+      res.writeHead(200, { 'Content-Type': 'text/html' })
       res.end(
         authCallbackHtml({
-          title: 'No authorization code received',
-          message: 'This page was opened without the OAuth "code" parameter.',
-          status: 'neutral',
-          sectionTitle: 'What to do',
+          title: 'Login complete',
+          message: 'You can close this tab and go back to the terminal.',
+          status: 'success',
+          sectionTitle: 'Next steps',
           commands: [
-            { comment: 'Restart login and try again', command: opts.loginCommand },
-            {
-              comment: 'If the browser can’t reach localhost, that’s fine',
-              command: '# Copy the redirect URL from the address bar and paste it into the terminal',
-            },
+            { comment: 'Plan: open the TUI to read your emails', command: 'zele' },
+            { comment: 'Plan: list your latest threads', command: 'zele mail list' },
+            { comment: 'Plan: search mail', command: 'zele mail search "from:github"' },
           ],
         }),
       )
-    })
-
-    server.listen(opts.port)
-    server.on('error', (err) => {
-      fail(new Error(`Failed to start local auth callback server on port ${opts.port}`, { cause: err }))
+      done(code!)
     })
 
     if (allowManualCodeEntry && process.stdin.isTTY) {
       rl = readline.createInterface({ input: process.stdin, output: process.stderr })
-      rl.question(pc.dim('Paste redirect URL here (or wait for auto-redirect): '), (answer) => {
-        const code = extractCodeFromInput(answer)
-        if (code) {
-          finish(code)
-        } else {
-          console.error(pc.yellow('Could not extract authorization code from input.'))
-          console.error(pc.dim('Waiting for browser redirect...'))
-        }
-      })
+      const ask = () => {
+        rl?.question(pc.dim('Paste redirect URL here (or wait for auto-redirect): '), (answer) => {
+          const pasted = codeFromRedirectUrl({ input: answer, state })
+          if (pasted instanceof Error) {
+            console.error(pc.yellow(pasted.message))
+            if (!resolved) ask()
+            return
+          }
+          done(pasted)
+        })
+      }
+      ask()
     }
   })
+
+  if (opts.openBrowser ?? true) await openInBrowser(authUrl)
+
+  const code = await result
+  if (code instanceof Error) return code
+  return { code, redirectUri }
 }

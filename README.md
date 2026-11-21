@@ -55,7 +55,7 @@ zele login --method google
 zele whoami
 ```
 
-On a TTY, login stays in the foreground. If the browser cannot reach localhost, paste the redirect URL into the prompt.
+On a TTY, login stays in the foreground. If the browser runs on another machine, the redirect page to `127.0.0.1` will not load. Copy the full URL from the address bar and paste it into the prompt.
 
 IMAP/SMTP password login is non-interactive.
 
@@ -68,7 +68,7 @@ zele login microsoft
 zele login microsoft --email you@outlook.com
 ```
 
-This uses Thunderbird's public Microsoft client ID and a localhost callback, same pattern as Google login.
+This uses Thunderbird's public Microsoft client ID and a loopback callback on `127.0.0.1`, same pattern as Google login.
 
 ### IMAP/SMTP accounts
 
@@ -154,7 +154,6 @@ Things to know:
 - **The file is a password.** IMAP passwords and OAuth refresh tokens are stored unencrypted. Send it over `scp`/`ssh`, never through chat, email or a synced folder. zele sets `~/.zele` to `700` and the files to `600` on every start.
 - **Both machines keep working.** Each copy refreshes its own access tokens. Google and Microsoft refresh tokens stay valid after use, so one machine does not log out the other.
 - **The copies do not sync.** A `login`, `logout` or `inbox create` changes only that machine. Read marks are per machine too: `mail reply` needs a `mail read` of the thread on the same machine.
-- **Custom OAuth clients.** If you logged in with `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET`, set the same variables on the other machine.
 - **Revoking access** (Google account security page, Microsoft account apps, changing the IMAP password) logs out every copy.
 
 To start clean instead, use the [headless login](#remote--headless-login-for-agents) on the other machine.
