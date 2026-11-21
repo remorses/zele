@@ -6,7 +6,8 @@ description: "How zele accesses, uses, stores, shares and deletes Google user da
 icon: lucide:shield-check
 prompt: |
   Privacy policy for Google OAuth verification of zele. Describe the local CLI
-  from @/zele/src/auth.ts (scopes), @/zele/src/schema.sql (local storage),
+  from @/zele/src/auth.ts (scopes), @/website/src/oauth-handoff.ts (login
+  relay for zele's own client), @/zele/src/schema.sql (local storage),
   @/zele/src/commands/inbox.ts (zele.sh sign-in code read from Gmail), and the
   @zele.sh service from @/website/src/receive-mail.ts, @/website/src/api.ts,
   @/website/src/db.ts, @/website/src/inbox-store.ts, @/website/src/email-rules.ts.
@@ -14,7 +15,7 @@ prompt: |
   @https://developers.google.com/terms/api-services-user-data-policy
 ---
 
-**Effective date:** November 20, 2026
+**Effective date:** November 21, 2026
 
 zele is an **email and calendar client that runs on your computer**. When you connect a Google account, zele talks to Google directly from your machine. Your Gmail and Google Calendar data **never passes through and is never stored on zele servers**.
 
@@ -42,7 +43,14 @@ When you run `zele login`, Google asks you to allow a set of **scopes**. The set
 
 zele's own client asks for the **narrowest scopes** that cover zele's features. Read-only or compose-only scopes cannot change labels, trash threads or manage filters. With either client, zele **never deletes mail permanently**. It only moves mail to the trash.
 
-zele logs in with **OAuth and PKCE**. Google sends the one-time authorization code to a temporary server on your own computer (`http://127.0.0.1`), and zele exchanges it with Google directly. zele.sh is not part of the Google login.
+### How login works
+
+zele logs in with **OAuth and PKCE**. Before login, zele makes a secret on your computer (the PKCE verifier). Google only accepts the one-time authorization code together with that secret, and zele exchanges it with Google directly. Where Google sends the code depends on the client:
+
+- **Thunderbird (default):** to a temporary server on your own computer (`http://127.0.0.1`). zele.sh is not involved.
+- **zele's own client:** to `https://zele.sh/oauth/google/callback`, so login also works when the browser runs on another device. zele.sh keeps **only that one-time code**, for at most 10 minutes, until zele on your computer collects it, then deletes it. Cloudflare request logs can still record the callback address with the code. zele.sh **cannot use the code**, because it never sees the PKCE verifier, and Google accepts each code only once.
+
+With either client, your **tokens and mail never reach zele.sh**.
 
 ### How zele uses it
 

@@ -6,9 +6,8 @@
 import { DurableObject, env } from 'cloudflare:workers'
 import { TRASH_RETENTION_MS, parseQuery } from './email-rules.ts'
 
-// wrangler types generates DurableObjectNamespace without the class generic.
 export function getInboxStore(userId: string) {
-  return env.INBOX_STORE.get(env.INBOX_STORE.idFromName(userId)) as DurableObjectStub<InboxStore>
+  return env.INBOX_STORE.get(env.INBOX_STORE.idFromName(userId))
 }
 
 export const MAIL_FOLDERS = ['inbox', 'archive', 'trash', 'spam'] as const
