@@ -19,7 +19,7 @@ Every login uses PKCE S256 and a random state ([RFC 7636](https://datatracker.ie
 
 ### zele client: zele.sh is the OAuth web client
 
-zele.sh holds the client secret and the scopes; the CLI holds the PKCE verifier. Neither can get tokens alone. The browser can run on any machine and nothing is pasted.
+zele.sh holds the client secret and the scopes; the CLI holds the PKCE verifier. Neither side can redeem the authorization code alone. The browser can run on any machine and nothing is pasted.
 
 ```
 zele login (CLI)                     browser (any device)           zele.sh Worker
@@ -40,8 +40,11 @@ Routes: `/oauth/google/start`, `/oauth/google/callback`, and `/api/v1/oauth/goog
 
 - `GET /oauth/google/start` validates state and challenge and builds Google's authorize URL with constants (client id, scopes, `access_type=offline`, `prompt=consent`, S256, `redirect_uri=${BETTER_AUTH_URL}/oauth/google/callback`). It stores nothing.
 - The confirm code (first 6 base32 chars of sha256(state), `ABC-DEF`) is printed by the CLI and shown on the start page, so a user can spot a login link someone else started.
+- `/start` also sets the cookie `__Host-zele_oauth=<sha256(state)>` (10 min, `SameSite=Lax`). The callback rejects a code without a matching cookie, so a raw Google authorize URL sent by someone else (skipping the confirm page) cannot complete a login.
+- Start and callback pages send `content-security-policy: default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'`.
 - The `OAuthHandoff` Durable Object (`idFromName(sha256(state))`) returns the code once and deletes itself with an alarm 10 minutes after the callback.
 - The token and refresh routes forward Google's JSON body as-is. They store and log nothing; on failure they return only `error` and `error_description`.
+- Tokens transit zele.sh (token and refresh routes), so Google may require a CASA security assessment for the restricted Gmail scopes.
 - Worker request logs (observability) record the callback URL, which contains the one-time code. The code is single-use and useless without the verifier.
 - Rate limits per `cf-connecting-ip`: poll 120/min, token and refresh 30/min, start and callback 20/min.
 - In the CLI, zele-client accounts keep no `refresh_token` on the `OAuth2Client`, so google-auth-library calls `refreshHandler` on expiry. It refreshes through zele.sh, saves the new access token, and maps `invalid_grant` to `AuthError` ("Run: zele login").

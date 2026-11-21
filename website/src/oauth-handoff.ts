@@ -1,5 +1,5 @@
 // Google OAuth web client for the zele CLI. zele.sh holds the client secret;
-// the CLI holds the PKCE verifier. Neither side can get tokens alone.
+// the CLI holds the PKCE verifier. Neither side can redeem the authorization code alone.
 //
 //   zele CLI ──opens /oauth/google/start?state&code_challenge──► confirm page (code ABC-123)
 //   browser ──"Continue to Google"──► Google consent
@@ -71,9 +71,30 @@ async function sha256(text: string): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
 }
 
+async function stateHash(state: string): Promise<string> {
+  return [...(await sha256(state))].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 async function getHandoff(state: string) {
-  const name = [...(await sha256(state))].map((b) => b.toString(16).padStart(2, '0')).join('')
-  return env.OAUTH_HANDOFF.get(env.OAUTH_HANDOFF.idFromName(name))
+  return env.OAUTH_HANDOFF.get(env.OAUTH_HANDOFF.idFromName(await stateHash(state)))
+}
+
+/**
+ * Set by /start, required by the callback: a raw Google authorize URL sent by an
+ * attacker skips the confirm page, so its callback has no cookie and is rejected.
+ * SameSite=Lax cookies are sent on Google's top-level redirect back here.
+ */
+const LOGIN_COOKIE = '__Host-zele_oauth'
+const LOGIN_COOKIE_MAX_AGE_S = 600
+
+function loginCookie(value: string, maxAgeS: number): string {
+  return `${LOGIN_COOKIE}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAgeS}`
+}
+
+function readLoginCookie(request: Request): string | null {
+  const cookies = request.headers.get('cookie')?.split(';') ?? []
+  const match = cookies.map((c) => c.trim()).find((c) => c.startsWith(`${LOGIN_COOKIE}=`))
+  return match ? match.slice(LOGIN_COOKIE.length + 1) : null
 }
 
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
@@ -101,12 +122,13 @@ function escapeHtml(text: string): string {
 }
 
 /** Never renders the code. The page loads nothing external, so the URL is not leaked via Referer. */
-function page({ title, message, status, confirmCode, action }: {
+function page({ title, message, status, confirmCode, action, setCookie }: {
   title: string
   message: string
   status: number
   confirmCode?: string
   action?: { href: string; label: string }
+  setCookie?: string
 }) {
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -147,6 +169,9 @@ function page({ title, message, status, confirmCode, action }: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
       'referrer-policy': 'no-referrer',
+      // The Continue link is a plain navigation, which CSP does not restrict.
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+      ...(setCookie ? { 'set-cookie': setCookie } : {}),
     },
   })
 }
@@ -202,6 +227,7 @@ export const oauthHandoffApp = new Spiceflow()
         confirmCode: await confirmCodeForState(state.data),
         action: { href: authorize.toString(), label: 'Continue to Google' },
         status: 200,
+        setCookie: loginCookie(await stateHash(state.data), LOGIN_COOKIE_MAX_AGE_S),
       })
     },
   })
@@ -220,13 +246,21 @@ export const oauthHandoffApp = new Spiceflow()
       if (!code && !error) {
         return page({ title: 'No authorization code', message: 'Google sent no code. Run zele login again.', status: 400 })
       }
+      if (readLoginCookie(request) !== (await stateHash(state.data))) {
+        return page({
+          title: 'Login not started here',
+          message: 'This sign-in did not start from the zele.sh page with the confirm code. Open the link printed by zele login in this browser.',
+          status: 403,
+        })
+      }
       const handoff = await getHandoff(state.data)
+      const clearCookie = loginCookie('', 0)
       if (code) {
         await handoff.complete({ code })
-        return page({ title: 'Login complete', message: 'You can close this tab and go back to the terminal.', status: 200 })
+        return page({ title: 'Login complete', message: 'You can close this tab and go back to the terminal.', status: 200, setCookie: clearCookie })
       }
       await handoff.complete({ error: error!, errorDescription: params.get('error_description') })
-      return page({ title: 'Login not completed', message: `Google returned: ${error}. Go back to the terminal.`, status: 400 })
+      return page({ title: 'Login not completed', message: `Google returned: ${error}. Go back to the terminal.`, status: 400, setCookie: clearCookie })
     },
   })
   .route({
