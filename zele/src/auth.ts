@@ -242,13 +242,14 @@ export async function login(
 
   // Upsert the account, then drop rows of this email from other Google clients:
   // getClient fails with "Multiple accounts matched" when one email has two rows.
-  // Their caches go too (ON DELETE CASCADE).
+  // Their caches go too (ON DELETE CASCADE). One immediate transaction, so two
+  // concurrent logins of the same email cannot delete each other's row.
   const db = getDb()
   const googleCapabilities = 'gmail,calendar,smtp'
   const now = new Date()
-  const upsertResult = await errore.tryAsync({
-    try: async () => {
-      db.insert(schema.account)
+  const upsertResult = errore.tryFn({
+    try: () => db.transaction((tx) => {
+      tx.insert(schema.account)
         .values({
           email,
           appId: googleClient.clientId,
@@ -264,14 +265,14 @@ export async function login(
           set: { tokens: JSON.stringify(tokens), capabilities: googleCapabilities, updatedAt: now },
         })
         .run()
-      db.delete(schema.account)
+      tx.delete(schema.account)
         .where(orm.and(
           orm.eq(schema.account.email, email),
           orm.eq(schema.account.accountType, 'google'),
           orm.ne(schema.account.appId, googleClient.clientId),
         ))
         .run()
-    },
+    }, { behavior: 'immediate' }),
     catch: (err) => new Error(`Failed to save account ${email}`, { cause: err }),
   })
   if (upsertResult instanceof Error) return upsertResult
@@ -629,7 +630,11 @@ async function authenticateAccount(account: AccountId): Promise<OAuth2Client> {
 
   const googleClient = googleClientForAppId(account.appId)
   if (!googleClient) {
-    throw new AuthError({ email: account.email, reason: `unknown Google OAuth client ${account.appId}. Run: zele login` })
+    // Saved by an older zele with ZELE_CLIENT_ID. Logging in again replaces the row; logout removes it.
+    throw new AuthError({
+      email: account.email,
+      reason: `it was saved with a custom Google OAuth client (${account.appId}) that zele no longer supports. Run: zele login (replaces it) or zele logout ${account.email}`,
+    })
   }
   const tokens: GoogleTokens = JSON.parse(row.tokens)
   const oauth2Client = createOAuth2Client(googleClient)

@@ -11,4 +11,4 @@ Browser login for Google and Microsoft is safer:
 
 Logging in to a Google account again replaces the saved login of the same email, so `--account` never matches two entries for one address.
 
-The `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET` overrides are removed. Accounts saved with a custom client must run `zele login` again.
+The `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET` overrides are removed. Accounts saved with a custom client must run `zele login` again, or be removed with `zele logout <email>`. Until then, commands that use every account fail with an error that names the account.
