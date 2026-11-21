@@ -235,9 +235,20 @@ export async function waitForOAuthCode(opts: {
     return new Error('Local auth callback server has no TCP port')
   }
   const redirectUri = `http://${LOOPBACK_HOST}:${address.port}`
-  const authUrl = opts.buildAuthUrl({ redirectUri, state })
+  // buildAuthUrl calls the provider SDK and onAuthorizationUrl publishes the URL; a throw must not leak the server.
+  const authUrl = errore.tryFn({
+    try: () => {
+      const url = opts.buildAuthUrl({ redirectUri, state })
+      opts.onAuthorizationUrl?.(url)
+      return url
+    },
+    catch: (err) => new Error(`Failed to start ${opts.provider} login`, { cause: err }),
+  })
+  if (authUrl instanceof Error) {
+    server.close()
+    return authUrl
+  }
 
-  opts.onAuthorizationUrl?.(authUrl)
   if (showInstructions) {
     console.error('\n' + pc.bold('1.') + ' Open this URL to authorize:\n')
     console.error('   ' + pc.cyan(pc.underline(authUrl)) + '\n')
@@ -258,8 +269,8 @@ export async function waitForOAuthCode(opts: {
       if (resolved) return
       resolved = true
       clearTimeout(timer)
-      server.closeAllConnections()
       server.close()
+      server.closeAllConnections()
       if (rl) {
         rl.close()
         process.stdin.unref()
@@ -342,6 +353,8 @@ export async function waitForOAuthCode(opts: {
 
     if (allowManualCodeEntry && process.stdin.isTTY) {
       rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+      // In raw mode readline eats Ctrl-C, so the process would keep waiting. Cancel the login instead.
+      rl.on('SIGINT', () => done(new Error(`Login cancelled. Run: ${opts.loginCommand}`)))
       const ask = () => {
         rl?.question(pc.dim('Paste redirect URL here (or wait for auto-redirect): '), (answer) => {
           const pasted = codeFromRedirectUrl({ input: answer, state })

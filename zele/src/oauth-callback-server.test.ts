@@ -70,6 +70,26 @@ test('loopback server ignores redirects with another state and returns the match
   expect(await pending).toEqual({ code: 'real-code', redirectUri: params.redirectUri })
 })
 
+test('a throwing authorization URL callback returns an error and closes the server', async () => {
+  let redirectUri = ''
+  const result = await waitForOAuthCode({
+    buildAuthUrl: (params) => {
+      redirectUri = params.redirectUri
+      return 'https://accounts.example/auth'
+    },
+    onAuthorizationUrl: () => {
+      throw new Error('publish failed')
+    },
+    loginCommand: 'zele login',
+    provider: 'Google',
+    openBrowser: false,
+    allowManualCodeEntry: false,
+    showInstructions: false,
+  })
+  expect(result instanceof Error && result.message).toMatchInlineSnapshot(`"Failed to start Google login"`)
+  expect(await fetch(redirectUri).then(() => 'open', () => 'closed')).toBe('closed')
+})
+
 describe('codeFromRedirectUrl', () => {
   const state = 'state-123'
   const message = (value: string | Error) => (value instanceof Error ? value.message : value)
