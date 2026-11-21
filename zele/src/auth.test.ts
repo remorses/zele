@@ -1,7 +1,10 @@
-// Tests for picking the account that holds a thread when several are signed in.
+// Tests for picking the account that holds a thread when several are signed in,
+// and for refreshing zele.sh client tokens through a local relay.
 
-import { describe, expect, test, vi } from 'vitest'
-import { pickThreadClient, type AccountType } from './auth.js'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import { createGoogleAuth, pickThreadClient, type AccountType } from './auth.js'
 import { ApiError, AuthError } from './api-utils.js'
 
 const THREAD_A = '1a1f5b5220d25d49'
@@ -70,5 +73,61 @@ describe('pickThreadClient', () => {
     const work = fakeClient('me@work.example', [])
     expect(await pickThreadClient([work, fakeClient('me@broken.example', [], { error: authError })], MISSING)).toBe(authError)
     expect(await pickThreadClient([work, fakeClient('me@broken.example', [], { error: serverError })], MISSING)).toBe(serverError)
+  })
+})
+
+describe('createGoogleAuth for the zele.sh client', () => {
+  /** Local stand-in for zele.sh /api/v1/oauth/google/refresh. Counts hits. */
+  async function startRefreshRelay() {
+    const hits: string[] = []
+    const server = http.createServer(async (req, res) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) chunks.push(chunk as Buffer)
+      const { refreshToken } = JSON.parse(Buffer.concat(chunks).toString()) as { refreshToken: string }
+      hits.push(refreshToken)
+      res.writeHead(refreshToken === 'revoked' ? 400 : 200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(refreshToken === 'revoked'
+        ? { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }
+        : { access_token: 'access-2', expires_in: 3599, token_type: 'Bearer' }))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    servers.push(server)
+    return { apiUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, hits }
+  }
+
+  const servers: http.Server[] = []
+  afterEach(() => {
+    for (const server of servers.splice(0)) server.close()
+  })
+
+  const client = { redirect: 'zele.sh', clientId: 'zele-web-test' } as const
+  const expired = { access_token: 'access-1', expiry_date: Date.now() - 1000, scope: 'gmail.modify calendar', token_type: 'Bearer' }
+
+  test('parallel token requests refresh once; saved tokens keep refresh_token and scope', async () => {
+    const relay = await startRefreshRelay()
+    const saved: object[] = []
+    const auth = createGoogleAuth({ client, tokens: { ...expired, refresh_token: 'refresh-1' }, email: 'me@example.com', apiUrl: relay.apiUrl, onRefresh: (t) => saved.push(t) })
+    const tokens = await Promise.all([auth.getAccessToken(), auth.getAccessToken()])
+    expect(tokens.map((t) => t.token)).toEqual(['access-2', 'access-2'])
+    expect(relay.hits).toEqual(['refresh-1'])
+    expect(saved.map((t) => ({ ...t, expiry_date: typeof (t as { expiry_date: unknown }).expiry_date }))).toMatchInlineSnapshot(`
+      [
+        {
+          "access_token": "access-2",
+          "expiry_date": "number",
+          "refresh_token": "refresh-1",
+          "scope": "gmail.modify calendar",
+          "token_type": "Bearer",
+        },
+      ]
+    `)
+    expect(auth.credentials.scope).toBe('gmail.modify calendar')
+  })
+
+  test('a revoked refresh token gives AuthError with a login hint', async () => {
+    const relay = await startRefreshRelay()
+    const auth = createGoogleAuth({ client, tokens: { ...expired, refresh_token: 'revoked' }, email: 'me@example.com', apiUrl: relay.apiUrl })
+    const result = await auth.getAccessToken().catch((err: unknown) => err)
+    expect(result instanceof AuthError && result.message).toMatchInlineSnapshot(`"Authentication failed for me@example.com: Google sign-in expired or was revoked. Run: zele login"`)
   })
 })

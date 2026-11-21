@@ -35,7 +35,7 @@ import {
 } from './api-utils.js'
 import { isGmailId } from './gmail-link.js'
 import { ImapSmtpClient, imapTlsOptions, tlsSocketOptions } from './imap-smtp-client.js'
-import { ZeleShApi, ZeleShClient, resolveZeleApiUrl } from './zele-sh-client.js'
+import { DEFAULT_ZELE_API_URL, ZeleShApi, ZeleShClient, resolveZeleApiUrl } from './zele-sh-client.js'
 import {
   createPkce,
   exchangeZeleShGoogleCode,
@@ -185,6 +185,15 @@ function selectGoogleClient(): GoogleOAuthClient | Error {
   return OAUTH_CLIENTS[name]!
 }
 
+/** Codes and tokens of the zele client only go to these, never to another ZELE_API_URL. */
+const GOOGLE_RELAY_URLS = [DEFAULT_ZELE_API_URL, 'https://preview.zele.sh']
+
+/** ZELE_API_URL when it is zele.sh or its preview, else https://zele.sh. */
+function googleRelayUrl(): string {
+  const url = resolveZeleApiUrl()
+  return GOOGLE_RELAY_URLS.includes(url) ? url : DEFAULT_ZELE_API_URL
+}
+
 /** Client a stored account logged in with. The account's appId is the client id. */
 function googleClientForAppId(appId: string): GoogleOAuthClient | undefined {
   return Object.values(OAUTH_CLIENTS).find((c) => c.clientId === appId)
@@ -195,11 +204,13 @@ function googleClientForAppId(appId: string): GoogleOAuthClient | undefined {
  * google-auth-library then calls refreshHandler on expiry instead of refreshing with
  * Google directly, which would need the client secret only zele.sh has.
  */
-function createGoogleAuth({ client, tokens, email, onRefresh }: {
+export function createGoogleAuth({ client, tokens, email, onRefresh, apiUrl = googleRelayUrl() }: {
   client: GoogleOAuthClient
   tokens: GoogleTokens
   email: string
   onRefresh?: (tokens: GoogleTokens) => void
+  /** zele.sh relay for refresh. Defaults to googleRelayUrl(); tests pass a local relay. */
+  apiUrl?: string
 }): OAuth2Client {
   if (client.redirect === 'loopback') {
     const oauth2Client = new OAuth2Client({ clientId: client.clientId, clientSecret: client.clientSecret })
@@ -215,14 +226,15 @@ function createGoogleAuth({ client, tokens, email, onRefresh }: {
   // passes the AuthError through. One refresh at a time: parallel Gmail calls share it.
   const refresh = async () => {
     const refreshed = refreshToken
-      ? await refreshZeleShGoogleToken({ apiUrl: resolveZeleApiUrl(), refreshToken, signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS) })
+      ? await refreshZeleShGoogleToken({ apiUrl, refreshToken, signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS) })
       : new GoogleTokenError({ oauthError: 'invalid_grant', description: 'no refresh token stored' })
     if (refreshed instanceof GoogleTokenError && refreshed.oauthError === 'invalid_grant') {
       throw new AuthError({ email, reason: 'Google sign-in expired or was revoked. Run: zele login', cause: refreshed })
     }
     if (refreshed instanceof Error) throw refreshed
     onRefresh?.({ ...tokens, ...refreshed })
-    return { access_token: refreshed.access_token, expiry_date: refreshed.expiry_date }
+    // setCredentials replaces all credentials, so keep scope for GmailClient's scope checks.
+    return { access_token: refreshed.access_token, expiry_date: refreshed.expiry_date, scope: refreshed.scope ?? tokens.scope }
   }
   let inflight: ReturnType<typeof refresh> | null = null
   oauth2Client.refreshHandler = () => {
@@ -322,7 +334,7 @@ function printExchanging(options?: BrowserAuthOptions) {
 
 /** zele client: zele.sh shows the consent link, relays the code, and adds the client secret to the exchange. */
 async function googleTokensViaZeleSh({ pkce, options }: { pkce: Pkce; options?: BrowserAuthOptions }) {
-  const apiUrl = resolveZeleApiUrl()
+  const apiUrl = googleRelayUrl()
   const grant = await waitForZeleShOAuthCode({
     apiUrl,
     challenge: pkce.challenge,

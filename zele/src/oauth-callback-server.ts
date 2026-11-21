@@ -44,6 +44,15 @@ export interface BrowserAuthOptions {
   onAuthorizationUrl?: (url: string, confirmCode?: string) => void
 }
 
+/** A failing browser opener must not abort login: the URL is already printed or published. */
+async function openBrowserOrHint({ url, showInstructions }: { url: string; showInstructions: boolean }) {
+  const opened = await errore.tryAsync({
+    try: () => openInBrowser(url),
+    catch: (err) => new Error('Could not open a browser', { cause: err }),
+  })
+  if (opened instanceof Error && showInstructions) printStderr(pc.yellow('Could not open a browser. Open the URL above.'))
+}
+
 /** PKCE S256 pair (RFC 7636). The verifier never leaves this process. */
 export function createPkce(): { verifier: string; challenge: string } {
   const verifier = randomBytes(32).toString('base64url')
@@ -393,7 +402,7 @@ export async function waitForOAuthCode(opts: {
     }
   })
 
-  if (opts.openBrowser ?? true) await openInBrowser(authUrl)
+  if (opts.openBrowser ?? true) await openBrowserOrHint({ url: authUrl, showInstructions })
 
   const code = await result
   if (code instanceof Error) return code
@@ -457,7 +466,7 @@ export async function waitForZeleShOAuthCode(opts: {
   process.once('SIGINT', onSigint)
   const signal = AbortSignal.any([cancel.signal, AbortSignal.timeout(LOGIN_TIMEOUT_MS)])
 
-  if (opts.openBrowser ?? true) await openInBrowser(startUrl)
+  if (opts.openBrowser ?? true) await openBrowserOrHint({ url: startUrl, showInstructions: opts.showInstructions ?? true })
   const code = await pollZeleShRelay({
     apiUrl: opts.apiUrl,
     state,
