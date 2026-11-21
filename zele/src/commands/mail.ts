@@ -519,6 +519,9 @@ export function registerMailCommands(cli: ZeleCli) {
 
         await markThreadSeen(out, { email, appId, threadId: thread.id, messages: thread.messages })
       }
+
+      const failed = settled.filter((r) => r.status === 'rejected' || r.value instanceof Error).length
+      if (failed === settled.length) out.exit(1)
     })
 
   // =========================================================================

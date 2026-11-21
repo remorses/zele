@@ -873,7 +873,7 @@ export async function pickThreadClient<
   T extends {
     email: string
     accountType: AccountType
-    client: { getThread(opts: { threadId: string; headersOnly?: boolean }): Promise<unknown> }
+    client: { getThread(opts: { threadId: string; skipCache?: boolean; headersOnly?: boolean }): Promise<unknown> }
   },
 >(clients: T[], threadId: string): Promise<T | Error> {
   if (clients.length === 1) return clients[0]!
@@ -884,7 +884,10 @@ export async function pickThreadClient<
   }
   if (google.length === 1) return google[0]!
 
-  const results = await Promise.all(google.map((entry) => entry.client.getThread({ threadId, headersOnly: true })))
+  // skipCache: a cached copy does not prove the thread still exists in that mailbox.
+  const results = await Promise.all(
+    google.map((entry) => entry.client.getThread({ threadId, skipCache: true, headersOnly: true })),
+  )
   const found = google.filter((_, i) => !(results[i] instanceof Error))
   if (found.length === 1) return found[0]!
   if (found.length > 1) {

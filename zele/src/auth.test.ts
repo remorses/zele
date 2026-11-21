@@ -31,7 +31,7 @@ describe('pickThreadClient', () => {
     const home = fakeClient('me@home.example', [THREAD_B])
     expect(await pickThreadClient([work, home], THREAD_A)).toBe(work)
     expect(await pickThreadClient([work, home], THREAD_B)).toBe(home)
-    expect(work.client.getThread).toHaveBeenCalledWith({ threadId: THREAD_A, headersOnly: true })
+    expect(work.client.getThread).toHaveBeenCalledWith({ threadId: THREAD_A, skipCache: true, headersOnly: true })
   })
 
   test('a Gmail ID with one Google account needs no lookup', async () => {
