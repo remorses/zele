@@ -9,7 +9,7 @@
 
 import {
   fetchCalendars,
-  fetchCalendarObjects,
+  calendarQuery,
   createCalendarObject,
   updateCalendarObject,
   deleteCalendarObject,
@@ -40,6 +40,15 @@ function caldavBoundary<T>(email: string, fn: () => Promise<T>) {
       ? new AuthError({ email, reason: String(err) })
       : new ApiError({ reason: String(err), cause: err }),
   })
+}
+
+/** Turn a non-ok HTTP response into an error value.
+ *  tsdav write helpers (PUT, DELETE) return the raw Response without checking its status. */
+function responseError({ email, res, what }: { email: string; res: Response; what: string }): AuthError | ApiError | undefined {
+  if (res.ok) return undefined
+  const reason = `${what} failed: ${res.status} ${res.statusText}`
+  if (res.status === 401) return new AuthError({ email, reason })
+  return new ApiError({ reason })
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +156,36 @@ function toIcsDate(dateStr: string, allDay = false): IcsDateObject {
 /** Generate a new UID for calendar events */
 function generateUID(): string {
   return `${crypto.randomUUID()}@zele`
+}
+
+/** Object URL for an event uid: `<calendar url><encoded uid>.ics`.
+ *  Google serves its own events at this URL, and createEvent saves new events there. */
+function eventObjectUrl(calendarUrl: string, uid: string): string {
+  const base = calendarUrl.endsWith('/') ? calendarUrl : `${calendarUrl}/`
+  return `${base}${encodeURIComponent(uid)}.ics`
+}
+
+/** CalDAV UTC time format for time-range filters: 20261114T100000Z */
+function caldavTime(iso: string): string {
+  return `${new Date(iso).toISOString().slice(0, 19).replace(/[-:]/g, '')}Z`
+}
+
+/** Read a text value from a parsed DAV property (string, `{_cdata}` or `{_text}`). */
+function davText(value: string | { _cdata?: string; _text?: string } | undefined): string | undefined {
+  if (typeof value === 'string') return value
+  return value?._cdata ?? value?._text
+}
+
+/** Find the event with this id or uid in calendar objects, skipping unparseable ones. */
+function findEventInObjects(objects: DAVCalendarObject[], eventId: string): CalendarEvent | undefined {
+  for (const obj of objects) {
+    if (!obj.data) continue
+    const events = parseICalData(obj.data, obj)
+    if (events instanceof ParseError) continue
+    const match = events.find((e) => e.id === eventId || e.uid === eventId)
+    if (match) return match
+  }
+  return undefined
 }
 
 /** Convert a single IcsEvent to our CalendarEvent type */
@@ -355,13 +394,21 @@ export class CalendarClient {
   private headers: Record<string, string>
   private email: string
   private appId: string
+  private serverUrl: string
   private calendarCache: DAVCalendar[] | null = null
   private timezoneCache: Record<string, string> = {}
 
-  constructor({ accessToken, email, appId }: { accessToken: string; email: string; appId: string }) {
+  constructor({ accessToken, email, appId, serverUrl = GOOGLE_CALDAV_URL }: {
+    accessToken: string
+    email: string
+    appId: string
+    /** CalDAV root URL ending with `/`. Tests point it at a local server. */
+    serverUrl?: string
+  }) {
     this.headers = { Authorization: `Bearer ${accessToken}` }
     this.email = email
     this.appId = appId
+    this.serverUrl = serverUrl
   }
 
   /** Update the access token (e.g. after refresh) */
@@ -424,10 +471,10 @@ export class CalendarClient {
     const calendars = await caldavBoundary(this.email, () =>
       fetchCalendars({
         account: {
-          serverUrl: GOOGLE_CALDAV_URL,
-          rootUrl: GOOGLE_CALDAV_URL,
+          serverUrl: this.serverUrl,
+          rootUrl: this.serverUrl,
           accountType: 'caldav',
-          homeUrl: `${GOOGLE_CALDAV_URL}${this.email}/`,
+          homeUrl: `${this.serverUrl}${this.email}/`,
         },
         headers: this.headers,
       }),
@@ -436,6 +483,55 @@ export class CalendarClient {
 
     this.calendarCache = calendars
     return calendars
+  }
+
+  /** Fetch event objects with their data in one calendar-query REPORT.
+   *  tsdav fetchCalendarObjects lists hrefs first and then fetches them all again
+   *  (multiget, or a second query with useMultiGet: false). It throws when one href
+   *  404s or the calendar changes between the two requests. */
+  private async queryCalendarObjects({ calendar, timeRange }: {
+    calendar: DAVCalendar
+    timeRange?: { start: string; end: string }
+  }): Promise<DAVCalendarObject[] | AuthError | ApiError> {
+    const responses = await caldavBoundary(this.email, () =>
+      calendarQuery({
+        url: calendar.url,
+        props: { 'd:getetag': {}, 'c:calendar-data': {} },
+        filters: {
+          'comp-filter': {
+            _attributes: { name: 'VCALENDAR' },
+            'comp-filter': {
+              _attributes: { name: 'VEVENT' },
+              ...(timeRange && {
+                'time-range': { _attributes: { start: caldavTime(timeRange.start), end: caldavTime(timeRange.end) } },
+              }),
+            },
+          },
+        },
+        depth: '1',
+        headers: this.headers,
+      }),
+    )
+    if (responses instanceof Error) return responses
+
+    return responses.flatMap((res) => {
+      const data = davText(res.props?.calendarData)
+      if (!res.href || !data) return []
+      return [{ url: new URL(res.href, calendar.url).href, etag: davText(res.props?.getetag), data }]
+    })
+  }
+
+  /** GET one calendar object by URL. Returns undefined when nothing is stored there. */
+  private async fetchCalendarObject(url: string): Promise<DAVCalendarObject | undefined | AuthError | ApiError> {
+    const res = await caldavBoundary(this.email, () => fetch(url, { headers: this.headers }))
+    if (res instanceof Error) return res
+    if (res.status === 404) return undefined
+    const statusError = responseError({ email: this.email, res, what: `GET ${url}` })
+    if (statusError) return statusError
+
+    const data = await caldavBoundary(this.email, () => res.text())
+    if (data instanceof Error) return data
+    return { url, etag: res.headers.get('etag') ?? undefined, data }
   }
 
   /** Resolve a calendarId to a DAVCalendar. 'primary' maps to the user's email. */
@@ -550,17 +646,10 @@ export class CalendarClient {
     const tz = await this.getTimezone(calendarId)
     if (tz instanceof Error) return tz
 
-    const fetchOpts: Parameters<typeof fetchCalendarObjects>[0] = {
+    const calObjects = await this.queryCalendarObjects({
       calendar: cal,
-      headers: this.headers,
-      urlFilter: () => true,
-    }
-
-    if (timeMin && timeMax) {
-      fetchOpts.timeRange = { start: timeMin, end: timeMax }
-    }
-
-    const calObjects = await caldavBoundary(this.email, () => fetchCalendarObjects(fetchOpts))
+      timeRange: timeMin && timeMax ? { start: timeMin, end: timeMax } : undefined,
+    })
     if (calObjects instanceof Error) return calObjects
 
     let events: CalendarEvent[] = []
@@ -601,22 +690,17 @@ export class CalendarClient {
     const cal = await this.resolveCalendar(calendarId)
     if (cal instanceof Error) return cal
 
-    const calObjects = await caldavBoundary(this.email, () =>
-      fetchCalendarObjects({
-        calendar: cal,
-        headers: this.headers,
-        urlFilter: () => true,
-      }),
-    )
-    if (calObjects instanceof Error) return calObjects
+    // Fast path: Google and zele store events at <encoded uid>.ics
+    const direct = await this.fetchCalendarObject(eventObjectUrl(cal.url, eventId))
+    if (direct instanceof Error) return direct
+    const directMatch = direct && findEventInObjects([direct], eventId)
+    if (directMatch) return directMatch
 
-    for (const obj of calObjects) {
-      if (!obj.data) continue
-      const events = parseICalData(obj.data, obj)
-      if (events instanceof ParseError) continue // skip unparseable calendar objects
-      const match = events.find((e) => e.id === eventId || e.uid === eventId)
-      if (match) return match
-    }
+    // Other clients can use any filename, so scan the whole calendar
+    const calObjects = await this.queryCalendarObjects({ calendar: cal })
+    if (calObjects instanceof Error) return calObjects
+    const match = findEventInObjects(calObjects, eventId)
+    if (match) return match
 
     return new NotFoundError({ resource: `event "${eventId}"` })
   }
@@ -670,23 +754,25 @@ export class CalendarClient {
       organizer: { email: this.email },
     })
 
-    const filename = `${uid.split('@')[0]}.ics`
+    const url = eventObjectUrl(cal.url, uid)
 
     const createResult = await caldavBoundary(this.email, () =>
       createCalendarObject({
         calendar: cal,
-        filename,
+        filename: `${encodeURIComponent(uid)}.ics`,
         iCalString,
         headers: this.headers,
       }),
     )
     if (createResult instanceof Error) return createResult
+    const createError = responseError({ email: this.email, res: createResult, what: `PUT ${url}` })
+    if (createError) return createError
 
     const events = parseICalData(iCalString)
     if (events instanceof ParseError) return events
     const event = events[0]
     if (!event) return new ParseError({ what: 'created event', reason: 'iCal round-trip produced no events' })
-    event.url = `${cal.url}${filename}`
+    event.url = url
 
     return event
   }
@@ -769,6 +855,8 @@ export class CalendarClient {
       }),
     )
     if (updateResult instanceof Error) return updateResult
+    const updateError = responseError({ email: this.email, res: updateResult, what: `PUT ${existing.url}` })
+    if (updateError) return updateError
 
     const events = parseICalData(iCalString)
     if (events instanceof ParseError) return events
@@ -800,7 +888,8 @@ export class CalendarClient {
       }),
     )
     if (deleteResult instanceof Error) return deleteResult
-
+    const deleteError = responseError({ email: this.email, res: deleteResult, what: `DELETE ${existing.url}` })
+    if (deleteError) return deleteError
   }
 
   async respondToEvent({
@@ -835,6 +924,8 @@ export class CalendarClient {
       }),
     )
     if (respondResult instanceof Error) return respondResult
+    const respondError = responseError({ email: this.email, res: respondResult, what: `PUT ${existing.url}` })
+    if (respondError) return respondError
 
     const events = parseICalData(iCalString)
     if (events instanceof ParseError) return events

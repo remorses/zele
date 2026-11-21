@@ -604,6 +604,7 @@ export class ImapSmtpClient {
   }: {
     threadId: string
     skipCache?: boolean
+    headersOnly?: boolean
   }): Promise<ThreadResult | NotFoundError | AuthError | ApiError> {
     const { folder, uid } = parseThreadId(threadId)
 

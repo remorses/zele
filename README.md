@@ -55,7 +55,7 @@ zele login --method google
 zele whoami
 ```
 
-On a TTY, login stays in the foreground. If the browser cannot reach localhost, paste the redirect URL into the prompt.
+On a TTY, login stays in the foreground. If the browser runs on another machine, the redirect page to `127.0.0.1` will not load. Copy the full URL from the address bar and paste it into the prompt.
 
 IMAP/SMTP password login is non-interactive.
 
@@ -68,7 +68,7 @@ zele login microsoft
 zele login microsoft --email you@outlook.com
 ```
 
-This uses Thunderbird's public Microsoft client ID and a localhost callback, same pattern as Google login.
+This uses Thunderbird's public Microsoft client ID and a loopback callback on `127.0.0.1`, same pattern as Google login.
 
 ### IMAP/SMTP accounts
 
@@ -131,6 +131,32 @@ Inboxes work like any other account: `mail list`, `read`, `search` (`from:`, `to
 zele whoami         # show authenticated accounts (type, capabilities)
 zele logout         # remove credentials
 ```
+
+### Use zele on another machine
+
+All zele state is in one **SQLite file**: `~/.zele/sqlite.db`. It holds every account, its OAuth tokens or IMAP password, the zele.sh session, and the mail cache. Copy it to log in on another machine (a server, a VM, an agent box) without a browser.
+
+```bash
+# on the machine that is logged in: make one consistent file (zele uses WAL mode)
+sqlite3 ~/.zele/sqlite.db ".backup /tmp/zele.db"
+scp /tmp/zele.db other-host:/tmp/zele.db && rm /tmp/zele.db
+
+# on the other machine: install the same or a newer zele, then
+mkdir -p -m 700 ~/.zele
+mv /tmp/zele.db ~/.zele/sqlite.db && chmod 600 ~/.zele/sqlite.db
+zele whoami
+```
+
+Without `sqlite3`, stop every zele process first and copy `sqlite.db` together with `sqlite.db-wal` if it exists. Copying `sqlite.db` alone can lose the latest token refresh.
+
+Things to know:
+
+- **The file is a password.** IMAP passwords and OAuth refresh tokens are stored unencrypted. Send it over `scp`/`ssh`, never through chat, email or a synced folder. zele sets `~/.zele` to `700` and the files to `600` on every start.
+- **Both machines keep working.** Each copy refreshes its own access tokens. Google and Microsoft refresh tokens stay valid after use, so one machine does not log out the other.
+- **The copies do not sync.** A `login`, `logout` or `inbox create` changes only that machine. Read marks are per machine too: `mail reply` needs a `mail read` of the thread on the same machine.
+- **Revoking access** (Google account security page, Microsoft account apps, changing the IMAP password) logs out every copy.
+
+To start clean instead, use the [headless login](#remote--headless-login-for-agents) on the other machine.
 
 ## Commands
 
@@ -296,7 +322,12 @@ zele label delete <label-id>
 
 ```bash
 zele mail filter list
+zele mail filter create --from news@example.com --add-label Newsletters --archive
+zele mail filter create --subject "invoice" --star --mark-read
+zele mail filter delete <filter-id>
 ```
+
+Creating and deleting filters needs the `gmail.settings.basic` Gmail scope. The default Google login cannot grant it yet, so `create` and `delete` fail with a message that links to the Gmail filter settings. Listing filters works with every login.
 
 ### Calendar (Google only)
 
@@ -346,7 +377,7 @@ zele profile                      # show account info
 
 All commands support `--account <email>` to filter by account. Without it, commands fetch from all accounts and merge results.
 
-Commands that take a thread ID find the account that has the thread, so the IDs `mail list` prints across accounts work without `--account`.
+Commands that take a Gmail thread ID find the account that has the thread, so they work without `--account`. IMAP IDs repeat between mailboxes and still need it.
 
 Google and IMAP/SMTP accounts work side by side — `mail list` merges results from both. Google-only features (labels, filters, calendar) show a helpful error when used with IMAP accounts.
 
@@ -395,6 +426,22 @@ zele mail list --filter "is:unread" --limit 100 | yq '.[].id' | xargs zele mail 
 # bulk archive unread
 zele mail list --filter "is:unread" --limit 100 | yq '.[].id' | xargs zele mail archive
 ```
+
+## MCP server
+
+`zele mcp` starts an **MCP server** over stdio. Every command becomes a tool with the same options: `mail list` becomes `mail_list`, `cal events` becomes `cal_events`. The tool result is the text the CLI prints: YAML for structured output, readable text for `mail read` and `draft get`, and hints or errors in a separate text block.
+
+```bash
+# Claude Code
+claude mcp add zele -- npx -y zele mcp
+
+# Cursor; replace cursor with vscode, windsurf, opencode, claude-desktop, ...
+npx -y @playwriter/install-mcp 'npx -y zele mcp' --name zele --client cursor
+```
+
+Log in with the CLI first (`zele login`). These commands are not tools: `login`, `logout`, `completions` and `mail watch`.
+
+Every tool takes an `account` argument (a list of emails), like `--account`. Pass the email text with `body`: `bodyFile: "-"` is refused because stdin is the MCP channel.
 
 ## Shell Completions
 

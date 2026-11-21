@@ -18,7 +18,7 @@ import { z } from 'zod'
 import { getClients } from '../auth.js'
 import type { WatchEvent } from '../gmail-client.js'
 import { AuthError, abortableSleep } from '../api-utils.js'
-import * as out from '../output.js'
+import { createOutput, formatDate, formatFlags, formatSender, type Output } from '../output.js'
 
 export const REPLY_FOLLOW_UP_HINT = 'Check existing replies first: watch only sees new mail. Run watch in a background shell that notifies you on exit, then mail read the match before telling the user.'
 
@@ -39,22 +39,23 @@ export function registerWatchCommands(cli: ZeleCli) {
     .option('--folder [folder]', z.string().describe('Folder to watch (default: inbox)'))
     .option('--filter [filter]', z.string().describe('Filter messages (from:, to:, cc:, subject:, is:unread, is:starred, has:attachment, -negate). See https://support.google.com/mail/answer/7190'))
     .option('--timeout [timeout]', z.string().describe('Max seconds to wait before exiting with code 1 (default: no timeout). Waiting days is fine, e.g. 259200 = 3 days'))
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const interval = options.interval ? Number(options.interval) : 15
       if (isNaN(interval) || interval < 1) {
         out.error('--interval must be a positive number of seconds')
-        process.exit(1)
+        out.exit(1)
       }
 
       const timeout = options.timeout ? Number(options.timeout) : undefined
       if (timeout !== undefined && (isNaN(timeout) || timeout < 1)) {
         out.error('--timeout must be a positive number of seconds')
-        process.exit(1)
+        out.exit(1)
       }
       // setTimeout fires immediately above 2^31-1 ms (~24.8 days).
       if (timeout !== undefined && timeout * 1000 > 2_147_483_647) {
         out.error('--timeout must be at most 2147483 seconds (~24 days)')
-        process.exit(1)
+        out.exit(1)
       }
 
       const folder = options.folder ?? 'inbox'
@@ -118,7 +119,7 @@ export function registerWatchCommands(cli: ZeleCli) {
           break
         case 'timeout':
           out.error(`Timed out after ${elapsed()} waiting for a matching email`)
-          process.exit(1)
+          out.exit(1)
           break
         case 'error': {
           const err = result.error
@@ -127,12 +128,12 @@ export function registerWatchCommands(cli: ZeleCli) {
           } else {
             out.error(`Watch failed after ${elapsed()}: ${err instanceof Error ? err.message : String(err)}`)
           }
-          process.exit(1)
+          out.exit(1)
           break
         }
         case 'closed':
           out.error(`Watch ended after ${elapsed()} without matching any email`)
-          process.exit(1)
+          out.exit(1)
           break
       }
     })
@@ -146,12 +147,12 @@ function formatWatchEvent(event: WatchEvent) {
   return {
     account: event.account.email,
     type: event.type,
-    from: out.formatSender(event.message.from),
+    from: formatSender(event.message.from),
     subject: event.message.subject,
-    date: out.formatDate(event.message.date),
+    date: formatDate(event.message.date),
     thread_id: event.threadId,
     message_id: event.message.id,
-    flags: out.formatFlags(event.message),
+    flags: formatFlags(event.message),
   }
 }
 

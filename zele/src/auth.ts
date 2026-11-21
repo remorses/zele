@@ -6,6 +6,7 @@
 // app_id is the OAuth client ID used during login (Google) or `imap_smtp`.
 
 import { OAuth2Client } from 'googleapis-common'
+import { CodeChallengeMethod } from 'google-auth-library'
 
 type GoogleTokens = {
   access_token?: string | null
@@ -21,14 +22,22 @@ import { getDb, schema } from './db.js'
 import { GmailClient } from './gmail-client.js'
 import { CalendarClient } from './calendar-client.js'
 import * as errore from 'errore'
-import { AuthError, NotFoundError, ThreadInManyAccountsError, UnsupportedError, ZeleShSignedOutError } from './api-utils.js'
+import {
+  AccountRequiredError,
+  AuthError,
+  isNotFoundError,
+  mapConcurrent,
+  NotFoundError,
+  ThreadInManyAccountsError,
+  UnsupportedError,
+  ZeleShSignedOutError,
+} from './api-utils.js'
+import { isGmailId } from './gmail-link.js'
 import { ImapSmtpClient, imapTlsOptions, tlsSocketOptions } from './imap-smtp-client.js'
 import { ZeleShApi, ZeleShClient } from './zele-sh-client.js'
-import { waitForOAuthCode, type BrowserAuthOptions } from './oauth-callback-server.js'
+import { createPkce, waitForOAuthCode, type BrowserAuthOptions } from './oauth-callback-server.js'
 import {
-  MICROSOFT_REDIRECT_PORT,
   buildMicrosoftAuthUrl,
-  createPkce,
   emailFromIdToken,
   exchangeMicrosoftCode,
   refreshMicrosoftToken,
@@ -93,100 +102,84 @@ export function hasCapability(capabilities: string | AccountCapability[], cap: A
 }
 
 // ---------------------------------------------------------------------------
-// Known open-source Google OAuth clients (Desktop app type).
-// All support localhost + OOB redirects. All have Gmail, Calendar, Drive,
-// Contacts, Tasks, and other Google API scopes enabled.
-// None support device code flow (requires "TVs and Limited Input" client type,
-// which Google restricts — Gmail scopes are blocked from device code entirely).
-// Source: public open-source repos, tested 2026-02-09.
+// Google OAuth clients
+//
+// All are Desktop app clients: Google redirects to a loopback server on
+// 127.0.0.1 with any port (oauth-callback-server.ts), and every login sends
+// PKCE S256 and a random state. Google does not treat desktop client secrets
+// as confidential, so they are embedded, like Thunderbird does.
+// https://developers.google.com/identity/protocols/oauth2/native-app
+//
+// Pick one with ZELE_GOOGLE_CLIENT=<name>. Default is thunderbird until Google
+// approves the zele client's restricted scopes (docs/google-oauth-verification.md).
 // ---------------------------------------------------------------------------
-const OAUTH_CLIENTS: Record<string, { clientId: string; clientSecret: string; redirectPort: number }> = {
+
+interface GoogleOAuthClient {
+  clientId: string
+  clientSecret: string
+  scopes: string[]
+}
+
+/** Scopes the third-party clients can grant. They cannot grant gmail.settings.basic. */
+const THIRD_PARTY_CLIENT_SCOPES = [
+  'https://mail.google.com/',
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/userinfo.email',
+]
+
+const OAUTH_CLIENTS: Record<string, GoogleOAuthClient> = {
   // Mozilla Thunderbird — largest user base, highest Google quota.
   // Source: searchfox.org/comm-central/source/mailnews/base/src/OAuth2Providers.sys.mjs
   thunderbird: {
     clientId: '406964657835-aq8lmia8j95dhl1a2bvharmfk3t1hgqj.apps.googleusercontent.com',
     clientSecret: 'kSmqreRr0qwBWJgbf5Y-PjSU',
-    redirectPort: 8089,
+    scopes: THIRD_PARTY_CLIENT_SCOPES,
   },
   // GNOME Online Accounts — used by Evolution, GNOME Calendar, Nautilus (Drive).
   // Source: github.com/GNOME/gnome-online-accounts/blob/master/meson_options.txt
   gnome: {
     clientId: '44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com',
     clientSecret: '-gMLuQyDiI0XrQS_vx_mhuYF',
-    redirectPort: 8089,
+    scopes: THIRD_PARTY_CLIENT_SCOPES,
   },
   // KDE KAccounts — used by KMail, KOrganizer, Kontact.
   // Source: github.com/KDE/kaccounts-providers google.provider.in
   kde: {
     clientId: '317066460457-pkpkedrvt2ldq6g2hj1egfka2n7vpuoo.apps.googleusercontent.com',
     clientSecret: 'Y8eFAaWfcanV3amZdDvtbYUq',
-    redirectPort: 8089,
+    scopes: THIRD_PARTY_CLIENT_SCOPES,
+  },
+  // zele's own Desktop client in Google Cloud project zele-sh. Unverified for now.
+  zele: {
+    clientId: '701207960653-cd08in62hjsld2ftk39eg8u6h7vrlqes.apps.googleusercontent.com',
+    clientSecret: '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',
+    scopes: [
+      'https://www.googleapis.com/auth/gmail.modify',
+      'https://www.googleapis.com/auth/gmail.settings.basic',
+      'https://www.googleapis.com/auth/calendar',
+    ],
   },
 }
 
-const ACTIVE_CLIENT = OAUTH_CLIENTS.thunderbird!
+const DEFAULT_GOOGLE_CLIENT = 'thunderbird'
 
-const CLIENT_ID =
-  process.env.ZELE_CLIENT_ID ?? ACTIVE_CLIENT.clientId
-
-const CLIENT_SECRET =
-  process.env.ZELE_CLIENT_SECRET ?? ACTIVE_CLIENT.clientSecret
-
-const SCOPES = [
-  'https://mail.google.com/',                       // Gmail (full — covers settings, filters, etc.)
-  'https://www.googleapis.com/auth/calendar',       // Calendar (full)
-  'https://www.googleapis.com/auth/userinfo.email', // Email identity
-]
-
-// ---------------------------------------------------------------------------
-// OAuth client resolution
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve OAuth credentials and redirect port for a given appId.
- * Looks up the matching entry in OAUTH_CLIENTS by client ID.
- * Falls back to the active client / env vars.
- */
-function resolveOAuthClient(appId?: string) {
-  let clientId = CLIENT_ID
-  let clientSecret = CLIENT_SECRET
-  let redirectPort = ACTIVE_CLIENT.redirectPort
-
-  if (appId) {
-    // Look up by client ID value in OAUTH_CLIENTS
-    const entry = Object.values(OAUTH_CLIENTS).find((c) => c.clientId === appId)
-    if (entry) {
-      clientId = entry.clientId
-      clientSecret = entry.clientSecret
-      redirectPort = entry.redirectPort
-    } else {
-      // Unknown app ID — use it directly (custom client scenario).
-      // The caller must have set ZELE_CLIENT_SECRET or the token must
-      // already have a refresh_token that works without the secret.
-      clientId = appId
-    }
+/** Client used for new logins: ZELE_GOOGLE_CLIENT, else thunderbird. */
+function selectGoogleClient(): GoogleOAuthClient | Error {
+  const name = process.env.ZELE_GOOGLE_CLIENT || DEFAULT_GOOGLE_CLIENT
+  if (!Object.hasOwn(OAUTH_CLIENTS, name)) {
+    return new Error(`Unknown ZELE_GOOGLE_CLIENT "${name}". Use one of: ${Object.keys(OAUTH_CLIENTS).join(', ')}`)
   }
-
-  return { clientId, clientSecret, redirectPort }
+  return OAUTH_CLIENTS[name]!
 }
 
-// ---------------------------------------------------------------------------
-// OAuth2 client factory
-// ---------------------------------------------------------------------------
+/** Client a stored account logged in with. The account's appId is the client id. */
+function googleClientForAppId(appId: string): GoogleOAuthClient | undefined {
+  return Object.values(OAUTH_CLIENTS).find((c) => c.clientId === appId)
+}
 
-/**
- * Create an OAuth2Client. If appId is provided, looks up the matching
- * client credentials from OAUTH_CLIENTS by client ID. Falls back to
- * the active client / env vars.
- */
-export function createOAuth2Client(appId?: string): OAuth2Client {
-  const { clientId, clientSecret, redirectPort } = resolveOAuthClient(appId)
-
-  return new OAuth2Client({
-    clientId,
-    clientSecret,
-    redirectUri: `http://localhost:${redirectPort}`,
-  })
+/** The redirect URI is per login (random loopback port), so it is passed per call, not here. */
+function createOAuth2Client(client: GoogleOAuthClient): OAuth2Client {
+  return new OAuth2Client({ clientId: client.clientId, clientSecret: client.clientSecret })
 }
 
 // ---------------------------------------------------------------------------
@@ -202,22 +195,33 @@ export interface AccountId {
 }
 
 // ---------------------------------------------------------------------------
-// Browser OAuth flow
+// Login: browser OAuth → save tokens to DB
 // ---------------------------------------------------------------------------
 
-async function getAuthCodeFromBrowser(
-  oauth2Client: OAuth2Client,
-  port: number,
+/**
+ * Run the full browser OAuth flow and save the account to the DB.
+ * Replaces Google rows of the same email from other clients, so one email is one account.
+ * Returns either a successful login payload or an Error value.
+ */
+export async function login(
   options?: BrowserAuthOptions,
-): Promise<string | Error> {
-  const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: SCOPES,
-    prompt: 'consent',
-  })
-  return waitForOAuthCode({
-    authUrl,
-    port,
+): Promise<{ email: string; appId: string; client: GmailClient } | Error> {
+  const googleClient = selectGoogleClient()
+  if (googleClient instanceof Error) return googleClient
+  const oauth2Client = createOAuth2Client(googleClient)
+  const { verifier, challenge } = createPkce()
+
+  const grant = await waitForOAuthCode({
+    buildAuthUrl: ({ redirectUri, state }) =>
+      oauth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: googleClient.scopes,
+        prompt: 'consent',
+        redirect_uri: redirectUri,
+        state,
+        code_challenge: challenge,
+        code_challenge_method: CodeChallengeMethod.S256,
+      }),
     loginCommand: 'zele login',
     provider: 'Google',
     openBrowser: options?.openBrowser,
@@ -225,32 +229,14 @@ async function getAuthCodeFromBrowser(
     showInstructions: options?.showInstructions,
     onAuthorizationUrl: options?.onAuthorizationUrl,
   })
-}
-
-// ---------------------------------------------------------------------------
-// Login: browser OAuth → save tokens to DB
-// ---------------------------------------------------------------------------
-
-/**
- * Run the full browser OAuth flow and save the account to the DB.
- * Returns either a successful login payload or an Error value.
- */
-export async function login(
-  appId?: string,
-  options?: BrowserAuthOptions,
-): Promise<{ email: string; appId: string; client: GmailClient } | Error> {
-  const resolved = resolveOAuthClient(appId)
-  const oauth2Client = createOAuth2Client(appId)
-
-  const code = await getAuthCodeFromBrowser(oauth2Client, resolved.redirectPort, options)
-  if (code instanceof Error) return code
+  if (grant instanceof Error) return grant
 
   if (options?.showInstructions ?? true) {
     console.error(pc.dim('Got authorization code, exchanging for tokens...'))
   }
 
   const tokenResponse = await errore.tryAsync({
-    try: () => oauth2Client.getToken(code),
+    try: () => oauth2Client.getToken({ code: grant.code, codeVerifier: verifier, redirect_uri: grant.redirectUri }),
     catch: (err) => new Error('Failed to exchange authorization code for tokens', { cause: err }),
   })
   if (tokenResponse instanceof Error) return tokenResponse
@@ -264,16 +250,19 @@ export async function login(
   if (profile instanceof Error) return profile
   const email = profile.emailAddress
 
-  // Upsert account in DB
+  // Upsert the account, then drop rows of this email from other Google clients:
+  // getClient fails with "Multiple accounts matched" when one email has two rows.
+  // Their caches go too (ON DELETE CASCADE). One immediate transaction, so two
+  // concurrent logins of the same email cannot delete each other's row.
   const db = getDb()
   const googleCapabilities = 'gmail,calendar,smtp'
   const now = new Date()
-  const upsertResult = await errore.tryAsync({
-    try: async () => {
-      db.insert(schema.account)
+  const upsertResult = errore.tryFn({
+    try: () => db.transaction((tx) => {
+      tx.insert(schema.account)
         .values({
           email,
-          appId: resolved.clientId,
+          appId: googleClient.clientId,
           accountType: 'google',
           capabilities: googleCapabilities,
           accountStatus: 'active',
@@ -286,12 +275,19 @@ export async function login(
           set: { tokens: JSON.stringify(tokens), capabilities: googleCapabilities, updatedAt: now },
         })
         .run()
-    },
+      tx.delete(schema.account)
+        .where(orm.and(
+          orm.eq(schema.account.email, email),
+          orm.eq(schema.account.accountType, 'google'),
+          orm.ne(schema.account.appId, googleClient.clientId),
+        ))
+        .run()
+    }, { behavior: 'immediate' }),
     catch: (err) => new Error(`Failed to save account ${email}`, { cause: err }),
   })
   if (upsertResult instanceof Error) return upsertResult
 
-  return { email, appId: resolved.clientId, client }
+  return { email, appId: googleClient.clientId, client }
 }
 
 // ---------------------------------------------------------------------------
@@ -461,16 +457,9 @@ export async function loginMicrosoft(
   options?: BrowserAuthOptions & { email?: string },
 ): Promise<{ email: string; appId: string } | Error> {
   const { verifier, challenge } = createPkce()
-  const redirectUri = `http://localhost:${MICROSOFT_REDIRECT_PORT}`
-  const authUrl = buildMicrosoftAuthUrl({
-    challenge,
-    redirectUri,
-    loginHint: options?.email,
-  })
-
-  const code = await waitForOAuthCode({
-    authUrl,
-    port: MICROSOFT_REDIRECT_PORT,
+  const grant = await waitForOAuthCode({
+    buildAuthUrl: ({ redirectUri, state }) =>
+      buildMicrosoftAuthUrl({ challenge, redirectUri, state, loginHint: options?.email }),
     loginCommand: 'zele login microsoft',
     provider: 'Microsoft',
     openBrowser: options?.openBrowser,
@@ -478,13 +467,13 @@ export async function loginMicrosoft(
     showInstructions: options?.showInstructions,
     onAuthorizationUrl: options?.onAuthorizationUrl,
   })
-  if (code instanceof Error) return code
+  if (grant instanceof Error) return grant
 
   if (options?.showInstructions ?? true) {
     console.error(pc.dim('Got authorization code, exchanging for tokens...'))
   }
 
-  const oauth = await exchangeMicrosoftCode({ code, verifier, redirectUri })
+  const oauth = await exchangeMicrosoftCode({ code: grant.code, verifier, redirectUri: grant.redirectUri })
   if (oauth instanceof Error) return oauth
 
   const email = resolveMicrosoftAccountEmail({
@@ -649,8 +638,16 @@ async function authenticateAccount(account: AccountId): Promise<OAuth2Client> {
     throw new Error(`No account found for ${account.email}. Run: zele login`)
   }
 
+  const googleClient = googleClientForAppId(account.appId)
+  if (!googleClient) {
+    // Saved by an older zele with ZELE_CLIENT_ID. Logging in again replaces the row; logout removes it.
+    throw new AuthError({
+      email: account.email,
+      reason: `it was saved with a custom Google OAuth client (${account.appId}) that zele no longer supports. Run: zele login (replaces it) or zele logout ${account.email}`,
+    })
+  }
   const tokens: GoogleTokens = JSON.parse(row.tokens)
-  const oauth2Client = createOAuth2Client(account.appId)
+  const oauth2Client = createOAuth2Client(googleClient)
   oauth2Client.setCredentials(tokens)
 
   // Refresh if expired — merge to preserve refresh_token which Google
@@ -760,41 +757,58 @@ export async function getClient(
 
 /**
  * Find the account that holds each thread, in the order given. With --account
- * or a single account, every thread goes to that account. Otherwise each
- * thread is looked up in every account, since thread IDs are per mailbox.
+ * or a single account, every thread goes to that account. Otherwise Gmail IDs
+ * are looked up in each Google account. See pickThreadClient.
  */
 export async function getClientsForThreads(
   accounts: string[] | undefined,
   threadIds: string[],
-): Promise<Array<ClientEntry | NotFoundError | AuthError | ThreadInManyAccountsError>> {
+): Promise<Array<ClientEntry | Error>> {
   const clients = await getClients(accounts)
-  return Promise.all(threadIds.map((threadId) => pickThreadClient(clients, threadId)))
+  // Wrapped so one failed lookup doesn't stop mapConcurrent: mail read reports each thread on its own.
+  const picked = await mapConcurrent(threadIds, async (threadId) => ({
+    entry: await pickThreadClient(clients, threadId),
+  }))
+  return picked.map(({ entry }) => entry)
 }
 
-/** Pick the one client whose mailbox has the thread. A single client is used as is. */
-export async function pickThreadClient<T extends { email: string; client: { getThread(opts: { threadId: string }): Promise<unknown> } }>(
-  clients: T[],
-  threadId: string,
-): Promise<T | NotFoundError | AuthError | ThreadInManyAccountsError> {
+/**
+ * Pick the client whose mailbox has the thread. Only Gmail IDs can identify an
+ * account: IMAP "FOLDER:UID" IDs repeat between mailboxes, so a lookup could
+ * trash or reply to another account's message.
+ */
+export async function pickThreadClient<
+  T extends {
+    email: string
+    accountType: AccountType
+    client: { getThread(opts: { threadId: string; headersOnly?: boolean }): Promise<unknown> }
+  },
+>(clients: T[], threadId: string): Promise<T | Error> {
   if (clients.length === 1) return clients[0]!
 
-  const results = await Promise.all(clients.map((entry) => entry.client.getThread({ threadId })))
-  const found = clients.filter((_, i) => !(results[i] instanceof Error))
+  const google = isGmailId(threadId) ? clients.filter((c) => c.accountType === 'google') : []
+  if (google.length === 0) {
+    return new AccountRequiredError({ accounts: clients.map((c) => c.email).join(', ') })
+  }
+  if (google.length === 1) return google[0]!
+
+  const results = await Promise.all(google.map((entry) => entry.client.getThread({ threadId, headersOnly: true })))
+  const found = google.filter((_, i) => !(results[i] instanceof Error))
   if (found.length === 1) return found[0]!
   if (found.length > 1) {
     return new ThreadInManyAccountsError({ threadId, accounts: found.map((c) => c.email).join(', ') })
   }
-  // Not found anywhere. An auth failure may be hiding it, so report that first.
-  const authError = results.find((r) => r instanceof AuthError)
-  if (authError) return authError
-  return new NotFoundError({ resource: `thread ${threadId} (searched ${clients.map((c) => c.email).join(', ')})` })
+  // A failure other than a 404 may be hiding the thread, so report it instead of "not found".
+  const failure = results.find((r): r is Error => r instanceof Error && !isNotFoundError(r))
+  if (failure) return failure
+  return new NotFoundError({ resource: `thread ${threadId} (searched ${google.map((c) => c.email).join(', ')})` })
 }
 
 /** Find the account that holds one thread. See getClientsForThreads. */
 export async function getClientForThread(
   accounts: string[] | undefined,
   threadId: string,
-): Promise<ClientEntry | NotFoundError | AuthError | ThreadInManyAccountsError> {
+): Promise<ClientEntry | Error> {
   const [entry] = await getClientsForThreads(accounts, [threadId])
   return entry!
 }

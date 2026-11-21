@@ -2,13 +2,11 @@
 // Consumer Outlook IMAP only accepts AUTH=XOAUTH2 (LOGIN is disabled).
 // Client ID is Thunderbird's public desktop app, same pattern as Google login.
 
-import { createHash, randomBytes } from 'node:crypto'
 import * as errore from 'errore'
 
 export const MICROSOFT_CLIENT_ID = '9e5f94bc-e8a4-4e73-b8be-63364c29d753'
 export const MICROSOFT_AUTH_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'
 export const MICROSOFT_TOKEN_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
-export const MICROSOFT_REDIRECT_PORT = 8089
 export const MICROSOFT_SCOPES = [
   'https://outlook.office.com/IMAP.AccessAsUser.All',
   'https://outlook.office.com/SMTP.Send',
@@ -25,15 +23,10 @@ export interface MicrosoftOAuthTokens {
   idToken?: string
 }
 
-export function createPkce(): { verifier: string; challenge: string } {
-  const verifier = randomBytes(32).toString('base64url')
-  const challenge = createHash('sha256').update(verifier).digest('base64url')
-  return { verifier, challenge }
-}
-
 export function buildMicrosoftAuthUrl(opts: {
   challenge: string
   redirectUri: string
+  state: string
   loginHint?: string
 }): string {
   const params = new URLSearchParams({
@@ -41,6 +34,7 @@ export function buildMicrosoftAuthUrl(opts: {
     response_type: 'code',
     redirect_uri: opts.redirectUri,
     scope: MICROSOFT_SCOPES.join(' '),
+    state: opts.state,
     code_challenge: opts.challenge,
     code_challenge_method: 'S256',
     response_mode: 'query',

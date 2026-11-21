@@ -7,12 +7,13 @@ import type { ZeleCli } from '../cli-types.js'
 import { getClients } from '../auth.js'
 import type { GmailClient } from '../gmail-client.js'
 import { AuthError } from '../api-utils.js'
-import * as out from '../output.js'
+import { createOutput, type Output } from '../output.js'
 
 export function registerProfileCommands(cli: ZeleCli) {
   cli
     .command('profile', 'Show account info')
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const clients = await getClients(options.account)
 
       // Fetch all accounts concurrently

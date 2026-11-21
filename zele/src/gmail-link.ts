@@ -16,6 +16,11 @@ const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 const TOKEN_RE = /^[BCDFGHJKLMNPQRSTVWXZbcdfghjklmnpqrstvwxz]{20,}$/
 const HEX_ID_RE = /^[0-9a-f]{12,16}$/i
 
+/** Whether an ID has the shape of a Gmail API thread or message ID. */
+export function isGmailId(id: string): boolean {
+  return HEX_ID_RE.test(id)
+}
+
 /**
  * Decode a Gmail view token to the string Gmail's web client reads from it,
  * e.g. "FMfcgzQjgzprnprxdnvfSqhzZWCXlMJF" → "thread-f:1882323577560259913".

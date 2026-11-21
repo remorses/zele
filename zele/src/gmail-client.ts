@@ -13,7 +13,7 @@ import type { OAuth2Client } from 'googleapis-common'
 import { createMimeMessage } from 'mimetext'
 import { parseFrom, parseAddressList, resolveReplyRecipients, replySubject, threadAnchor, checkThreadLatestSeen, type SentInThread, type ThreadReplyEnvelope } from './email-utils.js'
 import * as errore from 'errore'
-import { withRetry, mapConcurrent, isTruthy, AuthError, isAuthLikeError, ApiError, NotFoundError, EmptyThreadError, MissingDataError, ValidationError, abortableSleep, SelfRecipientError, AmbiguousRecipientError, UnseenLatestError } from './api-utils.js'
+import { withRetry, mapConcurrent, isTruthy, AuthError, MissingScopeError, isAuthLikeError, ApiError, NotFoundError, EmptyThreadError, MissingDataError, ValidationError, abortableSleep, SelfRecipientError, AmbiguousRecipientError, UnseenLatestError } from './api-utils.js'
 import { renderEmailBody } from './output.js'
 import * as orm from 'drizzle-orm'
 import { getDb, schema } from './db.js'
@@ -338,6 +338,18 @@ function gmailBoundary<T>(email: string, fn: () => Promise<T>) {
   })
 }
 
+const GMAIL_SETTINGS_BASIC_SCOPE = 'https://www.googleapis.com/auth/gmail.settings.basic'
+/** filters.list accepts any of these. */
+const FILTER_READ_SCOPES = [
+  'https://mail.google.com/',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  GMAIL_SETTINGS_BASIC_SCOPE,
+]
+/** filters.create and filters.delete accept only gmail.settings.basic, even with https://mail.google.com/. */
+const FILTER_WRITE_SCOPES = [GMAIL_SETTINGS_BASIC_SCOPE]
+const FILTER_SCOPE_HINT = 'Manage filters in Gmail settings instead: https://mail.google.com/mail/u/0/#settings/filters'
+
 /**
  * Known folder names that map to Gmail system folders/labels.
  * Used to validate custom label names and prevent query injection.
@@ -441,11 +453,46 @@ export function threadMatchesListQuery(
 export class GmailClient {
   private gmail: gmail_v1.Gmail
   private labelIdCache: Record<string, string> = {}
+  /** Full payloads fetched by this client. Payloads never change, so getAttachment reuses them. */
+  private messagePayloads = new Map<string, gmail_v1.Schema$MessagePart>()
   private account: AccountId | null
+  private auth: OAuth2Client
 
   constructor({ auth, account }: { auth: OAuth2Client; account?: AccountId }) {
     this.gmail = gmailApi({ version: 'v1', auth })
+    this.auth = auth
     this.account = account ?? null
+  }
+
+  /** MissingScopeError when `granted` has none of `scopes`. */
+  private checkScopes({ granted, scopes, hint }: { granted: string[]; scopes: string[]; hint: string }): MissingScopeError | null {
+    if (scopes.some((scope) => granted.includes(scope))) return null
+    return new MissingScopeError({
+      email: this.account?.email ?? 'unknown',
+      scope: scopes.map((scope) => scope.replace('https://www.googleapis.com/auth/', '')).join(' or '),
+      hint,
+    })
+  }
+
+  /** Scopes of the access token. Asks Google's tokeninfo when the credentials have no scope
+   *  field (older saved tokens, or an automatic refresh whose response omitted it). */
+  private async grantedScopes(): Promise<string[] | AuthError | ApiError> {
+    const stored = this.auth.credentials.scope
+    if (stored) return stored.split(' ')
+    const info = await gmailBoundary(this.account?.email ?? 'unknown', async () => {
+      const { token } = await this.auth.getAccessToken()
+      if (!token) throw new Error('No access token to check scopes')
+      return this.auth.getTokenInfo(token)
+    })
+    if (info instanceof Error) return info
+    return info.scopes
+  }
+
+  /** Filter create and delete need gmail.settings.basic, which the default Google client cannot grant. */
+  async requireFilterWriteScope(): Promise<MissingScopeError | AuthError | ApiError | null> {
+    const granted = await this.grantedScopes()
+    if (granted instanceof Error) return granted
+    return this.checkScopes({ granted, scopes: FILTER_WRITE_SCOPES, hint: FILTER_SCOPE_HINT })
   }
 
   // =========================================================================
@@ -456,13 +503,19 @@ export class GmailClient {
     return this.account !== null
   }
 
-  private async getCachedThread(threadId: string): Promise<gmail_v1.Schema$Thread | undefined> {
+  /** Returns the row at any age. `fresh` is the TTL check. Invalidated rows have
+   *  a null historyId but keep rawData, because fetchThread reuses message payloads. */
+  private getCachedThreadRow(threadId: string): { raw: gmail_v1.Schema$Thread; historyId: string | null; fresh: boolean } | undefined {
     if (!this.cacheEnabled) return undefined
     const row = getDb().query.thread.findFirst({
       where: { email: this.account!.email, appId: this.account!.appId, threadId },
     }).sync()
-    if (!row || isExpired(row.createdAt, row.ttlMs)) return undefined
-    return JSON.parse(row.rawData) as gmail_v1.Schema$Thread
+    if (!row) return undefined
+    return {
+      raw: JSON.parse(row.rawData) as gmail_v1.Schema$Thread,
+      historyId: row.historyId,
+      fresh: !isExpired(row.createdAt, row.ttlMs),
+    }
   }
 
   private async cacheThreadData(threadId: string, raw: gmail_v1.Schema$Thread, parsed: ThreadData): Promise<void> {
@@ -508,11 +561,13 @@ export class GmailClient {
       .run()
   }
 
+  /** Marks rows stale instead of deleting them, so message payloads stay reusable. */
   async invalidateThreads(threadIds: string[]): Promise<void> {
     if (!this.cacheEnabled) return
     if (threadIds.length === 0) return
     getDb()
-      .delete(schema.thread)
+      .update(schema.thread)
+      .set({ historyId: null, ttlMs: 0 })
       .where(
         orm.and(
           orm.eq(schema.thread.email, this.account!.email),
@@ -524,17 +579,7 @@ export class GmailClient {
   }
 
   async invalidateThread(threadId: string): Promise<void> {
-    if (!this.cacheEnabled) return
-    getDb()
-      .delete(schema.thread)
-      .where(
-        orm.and(
-          orm.eq(schema.thread.email, this.account!.email),
-          orm.eq(schema.thread.appId, this.account!.appId),
-          orm.eq(schema.thread.threadId, threadId),
-        ),
-      )
-      .run()
+    await this.invalidateThreads([threadId])
   }
 
   private async getCachedLabels(): Promise<gmail_v1.Schema$Label[] | undefined> {
@@ -646,30 +691,17 @@ export class GmailClient {
       const hydrated = await mapConcurrent(pageThreads, async (t) => {
         if (!t.id) return null
 
-        const cached = await this.getCachedThread(t.id)
-        if (cached && t.historyId && cached.historyId && t.historyId === cached.historyId) {
-          return { parsed: this.parseThreadListItem(cached), raw: cached }
+        // Any thread change bumps its historyId, so a match is fresh at any age.
+        const cached = this.getCachedThreadRow(t.id)
+        if (cached && t.historyId && cached.historyId === t.historyId) {
+          return { parsed: this.parseThreadListItem(cached.raw), raw: cached.raw }
         }
 
-        const detail = await gmailBoundary(this.account?.email ?? 'unknown', () =>
-          withRetry(() =>
-            this.gmail.users.threads.get({
-              userId: 'me',
-              id: t.id!,
-              format: 'full',
-            }),
-          ),
-        )
-        if (detail instanceof AuthError) return detail
-        if (detail instanceof Error) return null
+        const raw = await this.fetchThread({ threadId: t.id, cached: cached?.raw })
+        if (raw instanceof AuthError) return raw
+        if (raw instanceof Error) return null
 
-        const parsed = this.parseThread(detail.data)
-        await this.cacheThreadData(t.id, detail.data, parsed)
-
-        return {
-          parsed: this.parseThreadListItem(detail.data),
-          raw: detail.data,
-        }
+        return { parsed: this.parseThreadListItem(raw), raw }
       })
       if (hydrated instanceof Error) return hydrated
 
@@ -709,38 +741,91 @@ export class GmailClient {
   async getThread({
     threadId,
     skipCache = false,
+    headersOnly = false,
   }: {
     threadId: string
     // mail read and reply seen-checks must skip cache. A stale cached last
     // message would be recorded as seen, then a live reply fetch would never
     // match, and the agent would loop on mail read.
     skipCache?: boolean
+    /** Messages get headers and labels but empty bodies and no attachments. Costs 40 units, not 120. */
+    headersOnly?: boolean
   }): Promise<ThreadResult | AuthError | ApiError> {
-    if (!skipCache) {
-      const cached = await this.getCachedThread(threadId)
-      if (cached) {
-        return { parsed: this.parseThread(cached), raw: cached }
-      }
+    const cached = this.getCachedThreadRow(threadId)
+    if (!skipCache && cached?.fresh) {
+      return { parsed: this.parseThread(cached.raw), raw: cached.raw }
     }
 
-    const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
-      withRetry(() =>
-        this.gmail.users.threads.get({
-          userId: 'me',
-          id: threadId,
-          format: 'full',
-        }),
-      ),
-    )
-    if (res instanceof Error) return res
+    if (headersOnly) {
+      const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+        withRetry(() =>
+          this.gmail.users.threads.get({ userId: 'me', id: threadId, format: 'metadata' }),
+        ),
+      )
+      if (res instanceof Error) return res
+      return { parsed: this.parseThread(res.data), raw: res.data }
+    }
 
-    const parsed = this.parseThread(res.data)
-    const result: ThreadResult = { parsed, raw: res.data }
+    const raw = await this.fetchThread({ threadId, cached: cached?.raw })
+    if (raw instanceof Error) return raw
+    return { parsed: this.parseThread(raw), raw }
+  }
 
-    // Write cache
-    await this.cacheThreadData(threadId, res.data, parsed)
+  /**
+   * Fetch a full thread and cache it. threads.get costs 120 units with format full
+   * and 40 with metadata. Message payloads never change, so with a cached copy we
+   * get metadata (current messages and labels) and fetch only new message bodies.
+   */
+  private async fetchThread({
+    threadId,
+    cached,
+  }: {
+    threadId: string
+    cached?: gmail_v1.Schema$Thread
+  }): Promise<gmail_v1.Schema$Thread | AuthError | ApiError> {
+    const email = this.account?.email ?? 'unknown'
+    const getThread = (format: 'full' | 'metadata') =>
+      gmailBoundary(email, () =>
+        withRetry(() => this.gmail.users.threads.get({ userId: 'me', id: threadId, format })),
+      )
+    const store = async (raw: gmail_v1.Schema$Thread) => {
+      await this.cacheThreadData(threadId, raw, this.parseThread(raw))
+      return raw
+    }
 
-    return result
+    const payloads = new Map<string, gmail_v1.Schema$MessagePart>()
+    for (const m of cached?.messages ?? []) {
+      if (m.id && m.payload) payloads.set(m.id, m.payload)
+    }
+    if (payloads.size === 0) {
+      const res = await getThread('full')
+      if (res instanceof Error) return res
+      return store(res.data)
+    }
+
+    const meta = await getThread('metadata')
+    if (meta instanceof Error) return meta
+    const messages = meta.data.messages ?? []
+    const missing = messages.filter((m) => !m.id || !payloads.has(m.id))
+
+    // Two messages.get calls at 60 units cost the same as one full threads.get.
+    if (missing.length > 1 || missing.some((m) => !m.id)) {
+      const res = await getThread('full')
+      if (res instanceof Error) return res
+      return store(res.data)
+    }
+    for (const m of missing) {
+      const res = await gmailBoundary(email, () =>
+        withRetry(() => this.gmail.users.messages.get({ userId: 'me', id: m.id!, format: 'full' })),
+      )
+      if (res instanceof Error) return res
+      if (res.data.payload) payloads.set(m.id!, res.data.payload)
+    }
+
+    return store({
+      ...meta.data,
+      messages: messages.map((m) => ({ ...m, payload: payloads.get(m.id!) ?? m.payload })),
+    })
   }
 
   async getMessage({
@@ -768,6 +853,7 @@ export class GmailClient {
       }
     }
 
+    if (format === 'full' && res.data.payload) this.messagePayloads.set(messageId, res.data.payload)
     return this.parseMessage(res.data)
   }
 
@@ -835,6 +921,7 @@ export class GmailClient {
             threadId,
           },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
@@ -872,7 +959,8 @@ export class GmailClient {
     /** undefined skips the check (TUI, --force, --dry-run). null means never read. */
     seenMessageId?: string | null
   }): Promise<ThreadReplyEnvelope | EmptyThreadError | SelfRecipientError | AmbiguousRecipientError | UnseenLatestError | AuthError | ApiError> {
-    const thread = await this.getThread({ threadId, skipCache: true })
+    // Recipients and threading headers need no bodies.
+    const thread = await this.getThread({ threadId, skipCache: true, headersOnly: true })
     if (thread instanceof Error) return thread
 
     const messages = thread.parsed.messages
@@ -1071,6 +1159,7 @@ export class GmailClient {
             message: { raw, threadId },
           },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
@@ -1093,6 +1182,9 @@ export class GmailClient {
     if (!res.data || !res.data.message) return new NotFoundError({ resource: `draft ${draftId}` })
 
     const message = this.parseMessage(res.data.message)
+    if (res.data.message.id && res.data.message.payload) {
+      this.messagePayloads.set(res.data.message.id, res.data.message.payload)
+    }
 
     return {
       id: res.data.id ?? draftId,
@@ -1164,6 +1256,7 @@ export class GmailClient {
         userId: 'me',
         requestBody: { id: draftId },
       }),
+      { idempotent: false },
     )
 
     return res.data
@@ -1272,6 +1365,7 @@ export class GmailClient {
             message: { raw, threadId },
           },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
@@ -1339,6 +1433,7 @@ export class GmailClient {
             message: { raw, threadId },
           },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
@@ -1351,45 +1446,19 @@ export class GmailClient {
   // =========================================================================
 
   async markAsRead({ threadIds }: { threadIds: string[] }): Promise<void | AuthError | ApiError> {
-    const messageIds = await this.getMessageIdsForThreads(threadIds, (labelIds) =>
-      labelIds.includes('UNREAD'),
-    )
-    if (messageIds instanceof Error) return messageIds
-    if (messageIds.length === 0) return
-    const mod = await this.batchModifyMessages(messageIds, { removeLabelIds: ['UNREAD'] })
-    if (mod instanceof Error) return mod
-    await this.invalidateAfterThreadMutation(threadIds)
+    return this.modifyThreads(threadIds, { removeLabelIds: ['UNREAD'] })
   }
 
   async markAsUnread({ threadIds }: { threadIds: string[] }): Promise<void | AuthError | ApiError> {
-    const messageIds = await this.getMessageIdsForThreads(threadIds, (labelIds) =>
-      !labelIds.includes('UNREAD'),
-    )
-    if (messageIds instanceof Error) return messageIds
-    if (messageIds.length === 0) return
-    const mod = await this.batchModifyMessages(messageIds, { addLabelIds: ['UNREAD'] })
-    if (mod instanceof Error) return mod
-    await this.invalidateAfterThreadMutation(threadIds)
+    return this.modifyThreads(threadIds, { addLabelIds: ['UNREAD'] })
   }
 
   async star({ threadIds }: { threadIds: string[] }): Promise<void | AuthError | ApiError> {
-    const messageIds = await this.getMessageIdsForThreads(threadIds)
-    if (messageIds instanceof Error) return messageIds
-    if (messageIds.length === 0) return
-    const mod = await this.batchModifyMessages(messageIds, { addLabelIds: ['STARRED'] })
-    if (mod instanceof Error) return mod
-    await this.invalidateAfterThreadMutation(threadIds)
+    return this.modifyThreads(threadIds, { addLabelIds: ['STARRED'] })
   }
 
   async unstar({ threadIds }: { threadIds: string[] }): Promise<void | AuthError | ApiError> {
-    const messageIds = await this.getMessageIdsForThreads(threadIds, (labelIds) =>
-      labelIds.includes('STARRED'),
-    )
-    if (messageIds instanceof Error) return messageIds
-    if (messageIds.length === 0) return
-    const mod = await this.batchModifyMessages(messageIds, { removeLabelIds: ['STARRED'] })
-    if (mod instanceof Error) return mod
-    await this.invalidateAfterThreadMutation(threadIds)
+    return this.modifyThreads(threadIds, { removeLabelIds: ['STARRED'] })
   }
 
   async modifyLabels({
@@ -1411,16 +1480,10 @@ export class GmailClient {
     if (removeErr) return removeErr
     const resolvedRemove = resolvedRemoveRaw.filter((id): id is string => typeof id === 'string')
 
-    const messageIds = await this.getMessageIdsForThreads(threadIds)
-    if (messageIds instanceof Error) return messageIds
-    if (messageIds.length === 0) return
-
-    const mod = await this.batchModifyMessages(messageIds, {
+    return this.modifyThreads(threadIds, {
       addLabelIds: resolvedAdd.filter((r): r is string => typeof r === 'string'),
       removeLabelIds: resolvedRemove,
     })
-    if (mod instanceof Error) return mod
-    await this.invalidateAfterThreadMutation(threadIds)
   }
 
   async trash({ threadId }: { threadId: string }) {
@@ -1430,7 +1493,7 @@ export class GmailClient {
         id: threadId,
       }),
     )
-    await this.invalidateAfterThreadMutation([threadId])
+    await this.invalidateThreads([threadId])
   }
 
   async untrash({ threadId }: { threadId: string }) {
@@ -1440,27 +1503,18 @@ export class GmailClient {
         id: threadId,
       }),
     )
-    await this.invalidateAfterThreadMutation([threadId])
+    await this.invalidateThreads([threadId])
   }
 
   async archive({ threadIds }: { threadIds: string[] }): Promise<void | AuthError | ApiError> {
-    const messageIds = await this.getMessageIdsForThreads(threadIds)
-    if (messageIds instanceof Error) return messageIds
-    if (messageIds.length === 0) return
-    const mod = await this.batchModifyMessages(messageIds, { removeLabelIds: ['INBOX'] })
-    if (mod instanceof Error) return mod
-    await this.invalidateAfterThreadMutation(threadIds)
+    return this.modifyThreads(threadIds, { removeLabelIds: ['INBOX'] })
   }
 
   async markAsSpam({ threadIds }: { threadIds: string[] }): Promise<void | AuthError | ApiError> {
-    const messageIds = await this.getMessageIdsForThreads(threadIds)
-    if (messageIds instanceof Error) return messageIds
-    if (messageIds.length === 0) return
-    const mod = await this.batchModifyMessages(messageIds, { addLabelIds: ['SPAM'], removeLabelIds: ['INBOX'] })
-    if (mod instanceof Error) return mod
-    await this.invalidateAfterThreadMutation(threadIds)
+    return this.modifyThreads(threadIds, { addLabelIds: ['SPAM'], removeLabelIds: ['INBOX'] })
   }
 
+  /** Only the spam messages get INBOX back, so this cannot use threads.modify. */
   async unmarkSpam({ threadIds }: { threadIds: string[] }): Promise<void | AuthError | ApiError> {
     const messageIds = await this.getMessageIdsForThreads(threadIds, (labelIds) =>
       labelIds.includes('SPAM'),
@@ -1469,40 +1523,35 @@ export class GmailClient {
     if (messageIds.length === 0) return
     const mod = await this.batchModifyMessages(messageIds, { removeLabelIds: ['SPAM'], addLabelIds: ['INBOX'] })
     if (mod instanceof Error) return mod
-    await this.invalidateAfterThreadMutation(threadIds)
-  }
-
-  /** Invalidate thread cache after a thread mutation. */
-  private async invalidateAfterThreadMutation(threadIds: string[]): Promise<void> {
     await this.invalidateThreads(threadIds)
   }
 
   /** Moves all spam threads to trash. Does not permanently delete. */
   async trashAllSpam(): Promise<{ count: number } | AuthError | ApiError> {
+    const { q } = buildGmailSearchParams({ folder: 'spam' })
     let totalDeleted = 0
     let pageToken: string | undefined
 
     while (true) {
-      const res = await this.listThreads({
-        folder: 'spam',
-        maxResults: 100,
-        pageToken,
-      })
+      // Only IDs are needed, so the threads are not hydrated like listThreads does.
+      const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+        withRetry(() =>
+          this.gmail.users.threads.list({ userId: 'me', q, maxResults: 100, pageToken }),
+        ),
+      )
       if (res instanceof Error) return res
 
-      if (res.threads.length === 0) break
+      const threadIds = (res.data.threads ?? []).map((t) => t.id).filter(isTruthy)
+      if (threadIds.length === 0) break
 
-      const threadIds = res.threads.map((t) => t.id)
-      const messageIds = await this.getMessageIdsForThreads(threadIds)
-      if (messageIds instanceof Error) return messageIds
-      const mod = await this.batchModifyMessages(messageIds, {
+      const mod = await this.modifyThreads(threadIds, {
         addLabelIds: ['TRASH'],
         removeLabelIds: ['SPAM', 'INBOX'],
       })
       if (mod instanceof Error) return mod
 
       totalDeleted += threadIds.length
-      pageToken = res.nextPageToken ?? undefined
+      pageToken = res.data.nextPageToken ?? undefined
       if (!pageToken) break
     }
 
@@ -1577,6 +1626,7 @@ export class GmailClient {
           color,
         },
       }),
+      { idempotent: false },
     )
 
     await this.invalidateLabels()
@@ -1623,7 +1673,13 @@ export class GmailClient {
   // Filters
   // =========================================================================
 
-  async listFilters(): Promise<{ parsed: gmail_v1.Schema$Filter[] } | AuthError | ApiError> {
+  async listFilters(): Promise<{ parsed: gmail_v1.Schema$Filter[] } | MissingScopeError | AuthError | ApiError> {
+    // Tokens without a scope field skip the check: listing works with every scope zele ever requested.
+    const stored = this.auth.credentials.scope
+    const scopeError = stored
+      ? this.checkScopes({ granted: stored.split(' '), scopes: FILTER_READ_SCOPES, hint: 'Log in again with: zele login' })
+      : null
+    if (scopeError) return scopeError
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() => this.gmail.users.settings.filters.list({ userId: 'me' })),
     )
@@ -1633,31 +1689,40 @@ export class GmailClient {
 
   async createFilter(opts: {
     from?: string
+    to?: string
+    subject?: string
     query?: string
     addLabelIds?: string[]
     removeLabelIds?: string[]
-  }): Promise<gmail_v1.Schema$Filter | AuthError | ApiError> {
+  }): Promise<gmail_v1.Schema$Filter | MissingScopeError | AuthError | ApiError> {
     const criteria: gmail_v1.Schema$FilterCriteria = {}
     if (opts.from) criteria.from = opts.from
+    if (opts.to) criteria.to = opts.to
+    if (opts.subject) criteria.subject = opts.subject
     if (opts.query) criteria.query = opts.query
 
     const action: gmail_v1.Schema$FilterAction = {}
     if (opts.addLabelIds?.length) action.addLabelIds = opts.addLabelIds
     if (opts.removeLabelIds?.length) action.removeLabelIds = opts.removeLabelIds
 
+    const scopeError = await this.requireFilterWriteScope()
+    if (scopeError) return scopeError
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() =>
         this.gmail.users.settings.filters.create({
           userId: 'me',
           requestBody: { criteria, action },
         }),
+        { idempotent: false },
       ),
     )
     if (res instanceof Error) return res
     return res.data
   }
 
-  async deleteFilter(filterId: string): Promise<void | AuthError | ApiError> {
+  async deleteFilter(filterId: string): Promise<void | MissingScopeError | AuthError | ApiError> {
+    const scopeError = await this.requireFilterWriteScope()
+    if (scopeError) return scopeError
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() =>
         this.gmail.users.settings.filters.delete({
@@ -1750,14 +1815,19 @@ export class GmailClient {
     messageId: string
     attachmentId: string
   }): Promise<string | NotFoundError | AuthError | ApiError> {
-    const message = await gmailBoundary(this.account?.email ?? 'unknown', () =>
-      withRetry(() =>
-        this.gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' }),
-      ),
-    )
-    if (message instanceof Error) return message
+    let payload = this.messagePayloads.get(messageId)
+    if (!payload) {
+      const message = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+        withRetry(() =>
+          this.gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' }),
+        ),
+      )
+      if (message instanceof Error) return message
+      payload = message.data.payload ?? undefined
+      if (payload) this.messagePayloads.set(messageId, payload)
+    }
 
-    const gmailAttachmentId = findPartById(message.data.payload, attachmentId)?.body?.attachmentId
+    const gmailAttachmentId = findPartById(payload, attachmentId)?.body?.attachmentId
     if (!gmailAttachmentId) {
       return new NotFoundError({ resource: `attachment ${attachmentId} in message ${messageId}` })
     }
@@ -2368,6 +2438,24 @@ export class GmailClient {
   // =========================================================================
   // Private: batch operations
   // =========================================================================
+
+  /** threads.modify changes every message in the thread for 10 units. Reading message
+   *  IDs first costs 40 units per thread plus 50 for batchModify. */
+  private async modifyThreads(
+    threadIds: string[],
+    body: { addLabelIds?: string[]; removeLabelIds?: string[] },
+  ): Promise<void | AuthError | ApiError> {
+    const result = await mapConcurrent(threadIds, async (id) => {
+      const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
+        withRetry(() => this.gmail.users.threads.modify({ userId: 'me', id, requestBody: body })),
+      )
+      if (res instanceof Error) return res
+      return null
+    })
+    // Invalidate even on failure: threads modified before the error changed.
+    await this.invalidateThreads(threadIds)
+    if (result instanceof Error) return result
+  }
 
   private async getMessageIdsForThreads(
     threadIds: string[],

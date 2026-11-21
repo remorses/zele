@@ -18,14 +18,15 @@
     "secrets:prod": "sigillo secrets download -c prod --format env | wrangler secret bulk --env=\"\""
   },
   "dependencies": {
-    "@holocron.so/vite": "0.36.0",
+    "@holocron.so/vite": "0.39.2",
     "better-auth": "1.7.7",
     "better-auth-drizzle-adapter": "1.2.1",
     "drizzle-orm": "1.0.0-beta.22",
     "postal-mime": "^4.0.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "spiceflow": "1.26.0-rsc.18",
+    "spiceflow": "1.26.0-rsc.22",
+    "tailwindcss": "^4.3.5",
     "ulid": "3.0.2",
     "zod": "^4.6.5"
   },

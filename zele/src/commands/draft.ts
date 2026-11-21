@@ -5,17 +5,15 @@
 
 import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
-import fs from 'node:fs'
 import * as clack from '@clack/prompts'
 import { getClients, getClient, getClientForThread } from '../auth.js'
 import type { GmailClient } from '../gmail-client.js'
 import type { ImapSmtpClient } from '../imap-smtp-client.js'
 import { AuthError } from '../api-utils.js'
 import { downloadAttachments } from '../email-utils.js'
-import { resolveAttachments } from './mail.js'
+import { readBodyFile, resolveAttachments } from './mail.js'
 import { parseDraftIdArg, parseThreadIdArg } from '../gmail-link.js'
-import * as out from '../output.js'
-import { handleCommandError } from '../output.js'
+import { createOutput, formatDate, renderEmailBody, type Output } from '../output.js'
 import { colors as pc, isAgent } from 'goke'
 
 export function registerDraftCommands(cli: ZeleCli) {
@@ -28,12 +26,13 @@ export function registerDraftCommands(cli: ZeleCli) {
     .option('--limit <limit>', z.number().default(20).describe('Max results'))
     .option('--page <page>', z.string().describe('Pagination token (requires --account, only works for a single account)'))
     .option('--filter <filter>', z.string().describe('Search query'))
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       const clients = await getClients(options.account)
 
       if (options.page && clients.length > 1) {
         out.error('--page cannot be used with multiple accounts (page tokens are per-account)')
-        process.exit(1)
+        out.exit(1)
       }
 
       // Fetch from all accounts concurrently
@@ -75,7 +74,7 @@ export function registerDraftCommands(cli: ZeleCli) {
           draft_id: d.id,
           to: d.to.join(', ') || '(no recipient)',
           subject: d.subject,
-          date: out.formatDate(d.date),
+          date: formatDate(d.date),
         })),
         { summary: `${merged.length} draft(s)`, nextPage: allResults[0]?.result.nextPageToken },
       )
@@ -87,31 +86,32 @@ export function registerDraftCommands(cli: ZeleCli) {
 
   cli
     .command('draft get <draftId>', 'Show draft details')
-    .action(async (draftIdArg, options) => {
+    .action(async (draftIdArg, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const draftId = parseDraftIdArg(draftIdArg)
-      if (draftId instanceof Error) handleCommandError(draftId)
+      if (draftId instanceof Error) out.fail(draftId)
 
       const { client } = await getClient(options.account)
 
       const draft = await client.getDraft({ draftId })
-      if (draft instanceof Error) handleCommandError(draft)
+      if (draft instanceof Error) out.fail(draft)
 
       const fmtRecipients = (list: Array<{ name?: string; email: string }>) =>
         list.map((r) => r.name && r.name !== r.email ? `${r.name} <${r.email}>` : r.email).join(', ')
 
-      console.log(pc.bold(`Draft: ${draft.message.subject}`))
-      console.log(pc.dim(`Draft ID: ${draft.id}`))
-      console.log(`To: ${fmtRecipients(draft.to) || '(none)'}`)
+      out.log(pc.bold(`Draft: ${draft.message.subject}`))
+      out.log(pc.dim(`Draft ID: ${draft.id}`))
+      out.log(`To: ${fmtRecipients(draft.to) || '(none)'}`)
       if (draft.cc.length > 0) {
-        console.log(`Cc: ${fmtRecipients(draft.cc)}`)
+        out.log(`Cc: ${fmtRecipients(draft.cc)}`)
       }
       if (draft.bcc.length > 0) {
-        console.log(`Bcc: ${fmtRecipients(draft.bcc)}`)
+        out.log(`Bcc: ${fmtRecipients(draft.bcc)}`)
       }
-      console.log()
+      out.log()
 
-      const body = out.renderEmailBody(draft.message.body, draft.message.mimeType)
-      console.log(body)
+      const body = renderEmailBody(draft.message.body, draft.message.mimeType)
+      out.log(body)
     })
 
   // =========================================================================
@@ -129,39 +129,30 @@ export function registerDraftCommands(cli: ZeleCli) {
     .option('--thread <thread>', z.string().describe('Thread ID to associate with'))
     .option('--from <from>', z.string().describe('Send-as alias email'))
     .option('--attach <attach>', z.array(z.string()).describe('File to attach (repeatable: --attach a.pdf --attach b.png)'))
-    .action(async (options) => {
+    .action(async (options, ctx) => {
+      const out: Output = createOutput(ctx)
       if (!options.to) {
         out.error('--to is required')
-        process.exit(1)
+        out.exit(1)
       }
       if (!options.subject) {
         out.error('--subject is required')
-        process.exit(1)
+        out.exit(1)
       }
 
       let body = options.body ?? ''
-      if (options.bodyFile) {
-        if (options.bodyFile === '-') {
-          const chunks: Buffer[] = []
-          for await (const chunk of process.stdin) {
-            chunks.push(chunk)
-          }
-          body = Buffer.concat(chunks).toString('utf-8')
-        } else {
-          body = fs.readFileSync(options.bodyFile, 'utf-8')
-        }
-      }
+      if (options.bodyFile) body = await readBodyFile(out, ctx, options.bodyFile)
 
       const parseEmails = (str: string) =>
         str.split(',').map((e) => e.trim()).filter(Boolean).map((email) => ({ email }))
 
-      const attachments = resolveAttachments(options.attach)
+      const attachments = resolveAttachments(out, options.attach)
 
       const threadId = options.thread ? parseThreadIdArg(options.thread) : undefined
-      if (threadId instanceof Error) handleCommandError(threadId)
+      if (threadId instanceof Error) out.fail(threadId)
 
       const entry = threadId ? await getClientForThread(options.account, threadId) : await getClient(options.account)
-      if (entry instanceof Error) handleCommandError(entry)
+      if (entry instanceof Error) out.fail(entry)
       const { client } = entry
 
       const result = await client.createDraft({
@@ -174,7 +165,7 @@ export function registerDraftCommands(cli: ZeleCli) {
         fromEmail: options.from,
         attachments,
       })
-      if (result instanceof Error) handleCommandError(result)
+      if (result instanceof Error) out.fail(result)
 
       out.printYaml(result)
       out.success('Draft created')
@@ -194,30 +185,21 @@ export function registerDraftCommands(cli: ZeleCli) {
     .option('--bcc <bcc>', z.string().describe('New BCC recipients (comma-separated)'))
     .option('--from <from>', z.string().describe('Send-as alias email'))
     .option('--attach <attach>', z.array(z.string()).describe('File to add to the existing attachments (repeatable: --attach a.pdf --attach b.png)'))
-    .action(async (draftIdArg, options) => {
+    .action(async (draftIdArg, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const draftId = parseDraftIdArg(draftIdArg)
-      if (draftId instanceof Error) handleCommandError(draftId)
+      if (draftId instanceof Error) out.fail(draftId)
 
-      const newAttachments = resolveAttachments(options.attach) ?? []
+      const newAttachments = resolveAttachments(out, options.attach) ?? []
 
       const { client } = await getClient(options.account)
 
       // Fetch existing draft to merge unchanged fields
       const existing = await client.getDraft({ draftId })
-      if (existing instanceof Error) handleCommandError(existing)
+      if (existing instanceof Error) out.fail(existing)
 
       let body = options.body
-      if (options.bodyFile) {
-        if (options.bodyFile === '-') {
-          const chunks: Buffer[] = []
-          for await (const chunk of process.stdin) {
-            chunks.push(chunk)
-          }
-          body = Buffer.concat(chunks).toString('utf-8')
-        } else {
-          body = fs.readFileSync(options.bodyFile, 'utf-8')
-        }
-      }
+      if (options.bodyFile) body = await readBodyFile(out, ctx, options.bodyFile)
 
       const parseEmails = (str: string) =>
         str.split(',').map((e) => e.trim()).filter(Boolean).map((email) => ({ email }))
@@ -228,7 +210,7 @@ export function registerDraftCommands(cli: ZeleCli) {
         messageId: existing.message.id,
         attachments: existing.message.attachments,
       })
-      if (existingAttachments instanceof Error) handleCommandError(existingAttachments)
+      if (existingAttachments instanceof Error) out.fail(existingAttachments)
 
       const result = await client.updateDraft({
         draftId,
@@ -241,7 +223,7 @@ export function registerDraftCommands(cli: ZeleCli) {
         threadId: existing.message.threadId || undefined,
         fromEmail: options.from ?? existing.message.from.email,
       })
-      if (result instanceof Error) handleCommandError(result)
+      if (result instanceof Error) out.fail(result)
 
       out.printYaml(result)
       out.success('Draft updated')
@@ -253,13 +235,14 @@ export function registerDraftCommands(cli: ZeleCli) {
 
   cli
     .command('draft send <draftId>', 'Send a draft. To wait for the answer, check existing replies, then run mail watch')
-    .action(async (draftIdArg, options) => {
+    .action(async (draftIdArg, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const draftId = parseDraftIdArg(draftIdArg)
-      if (draftId instanceof Error) handleCommandError(draftId)
+      if (draftId instanceof Error) out.fail(draftId)
 
       const { client } = await getClient(options.account)
       const result = await client.sendDraft({ draftId })
-      if (result instanceof Error) handleCommandError(result)
+      if (result instanceof Error) out.fail(result)
 
       out.printYaml(result)
       out.success('Draft sent')
@@ -272,14 +255,15 @@ export function registerDraftCommands(cli: ZeleCli) {
   cli
     .command('draft delete <draftId>', 'Delete a draft')
     .option('--force', 'Skip confirmation')
-    .action(async (draftIdArg, options) => {
+    .action(async (draftIdArg, options, ctx) => {
+      const out: Output = createOutput(ctx)
       const draftId = parseDraftIdArg(draftIdArg)
-      if (draftId instanceof Error) handleCommandError(draftId)
+      if (draftId instanceof Error) out.fail(draftId)
 
       if (!options.force) {
         if (isAgent || !process.stdin.isTTY) {
           out.error('Use --force to delete non-interactively')
-          process.exit(1)
+          out.exit(1)
         }
 
         const confirmed = await clack.confirm({
@@ -296,7 +280,7 @@ export function registerDraftCommands(cli: ZeleCli) {
       const { client } = await getClient(options.account)
 
       const deleteResult = await client.deleteDraft({ draftId })
-      if (deleteResult instanceof Error) handleCommandError(deleteResult)
+      if (deleteResult instanceof Error) out.fail(deleteResult)
 
       out.printYaml({ draft_id: draftId, deleted: true })
     })
