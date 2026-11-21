@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.12.0
+
+1. **New `zele mcp` command** — starts an MCP server over stdio. Every zele command is a tool with the same options (`mail list` is `mail_list`, `cal events` is `cal_events`), plus an `account` argument like `--account`. The tool result is the text the CLI prints (YAML for structured output):
+
+   ```bash
+   claude mcp add zele -- npx -y zele mcp
+   ```
+
+   `login`, `logout`, `completions` and `mail watch` are not tools. In MCP, pass email text with `body`; `bodyFile: "-"` is refused because stdin is the MCP channel.
+
+2. **New `mail filter create` and `mail filter delete` commands**:
+
+   ```bash
+   zele mail filter create --from news@example.com --add-label Newsletters --archive
+   zele mail filter create --subject "invoice" --star --mark-read
+   zele mail filter delete <filter-id>
+   ```
+
+   Criteria: `--from`, `--to`, `--subject`, `--query`. Actions: `--add-label` (one label, created if missing), `--remove-label` (repeatable, must exist), `--archive`, `--mark-read`, `--star`. Gmail accepts filter changes only with the `gmail.settings.basic` scope, which the default Google login cannot grant yet. zele checks the token's scopes first, so the command fails before it creates any label, with a link to the Gmail filter settings.
+
+3. **Gmail web links work as IDs** — commands that take a thread ID also take a Gmail link like `https://mail.google.com/mail/u/0/#inbox/FMfcgz…`, and draft commands take a compose link (`…#drafts?compose=…`). Links are decoded offline, with no API call.
+
+4. **Safer browser login for Google and Microsoft**:
+   - The callback server listens on `127.0.0.1` on a random port instead of `localhost:8089`, so login no longer kills whatever process used port 8089.
+   - Every login sends PKCE and a random state. zele checks the state in the browser redirect and in a pasted redirect URL.
+   - When the browser runs on another machine, paste the **full redirect URL** from the address bar. A bare code is no longer accepted.
+   - Login gives up after 10 minutes, and Ctrl-C cancels it.
+   - Logging in to a Google account again replaces the saved login of the same email, so `--account` never matches two entries for one address.
+
+   The `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET` overrides are removed. Accounts saved with a custom client must run `zele login` again, or be removed with `zele logout <email>`.
+
+5. **Gmail commands use fewer API quota units**, with the same output. `mail list` and `mail search` reuse cached threads while their history ID is unchanged, changed threads fetch only labels and new messages, and label changes (`star`, `archive`, `label`, read marks) cost 10 units per thread instead of about 90.
+
+6. **Faster calendar event commands** — `cal get`, `cal update`, `cal delete` and `cal respond` fetch only the requested event instead of the whole calendar, and `cal list` gets all events in one CalDAV request. A missing event fails with `event "..." not found`. Failed event writes are now reported as errors instead of successes.
+
+7. **Fixed `cal respond` on Google Calendar** — the reply keeps the invitation's organizer, so Google now applies it. Before, zele reported success but the invite stayed unanswered.
+
+8. **Gmail sends are never retried after an ambiguous error** — a 403 `backendError` could make `mail send`, `mail reply` or `draft send` send a duplicate. Sends now retry only real rate limit errors, and the worst-case retry wait dropped from hours to 30 seconds.
+
 ## 0.11.0
 
 1. **Drafts with attachments** — `draft create` and `draft update` accept repeatable `--attach <file>`, like `mail send`:
