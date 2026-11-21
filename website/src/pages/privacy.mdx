@@ -2,7 +2,7 @@
 $schema: https://holocron.so/frontmatter.json
 title: "Privacy policy"
 sidebarTitle: Privacy
-description: "How zele accesses, uses, stores, shares and deletes Google user data and @zele.sh mail. zele is a local CLI: Google data never reaches our servers."
+description: "How zele accesses, uses, stores, shares and deletes Google user data and @zele.sh mail. zele is a local CLI: your mail and calendar data never reaches our servers."
 icon: lucide:shield-check
 prompt: |
   Privacy policy for Google OAuth verification of zele. Describe the local CLI
@@ -17,9 +17,9 @@ prompt: |
 
 **Effective date:** November 21, 2026
 
-zele is an **email and calendar client that runs on your computer**. When you connect a Google account, zele talks to Google directly from your machine. Your Gmail and Google Calendar data **never passes through and is never stored on zele servers**.
+zele is an **email and calendar client that runs on your computer**. When you connect a Google account, zele reads and changes your mail and calendar by talking to Google directly from your machine. Your Gmail and Google Calendar data **never passes through and is never stored on zele servers**. Only login with zele's own client goes through zele.sh, as described in [How login works](#how-login-works).
 
-zele also offers an optional **@zele.sh** address service, which does run on our server. It is described separately in [The @zele.sh address service](#the-zelesh-address-service). It does not receive your Google data.
+zele also offers an optional **@zele.sh** address service, which does run on our server. It is described separately in [The @zele.sh address service](#the-zelesh-address-service). It does not receive your Gmail or Calendar data.
 
 ## Who we are
 
@@ -45,12 +45,12 @@ zele's own client asks for the **narrowest scopes** that cover zele's features. 
 
 ### How login works
 
-zele logs in with **OAuth and PKCE**. Before login, zele makes a secret on your computer (the PKCE verifier). Google only accepts the one-time authorization code together with that secret, and zele exchanges it with Google directly. Where Google sends the code depends on the client:
+zele logs in with **OAuth and PKCE**. Before login, zele makes a secret on your computer (the PKCE verifier). Google only gives out tokens for the one-time authorization code together with that secret. Where Google sends the code depends on the client:
 
-- **Thunderbird (default):** to a temporary server on your own computer (`http://127.0.0.1`). zele.sh is not involved.
-- **zele's own client:** to `https://zele.sh/oauth/google/callback`, so login also works when the browser runs on another device. zele.sh keeps **only that one-time code**, for at most 10 minutes, until zele on your computer collects it, then deletes it. Cloudflare request logs can still record the callback address with the code. zele.sh **cannot use the code**, because it never sees the PKCE verifier, and Google accepts each code only once.
+- **Thunderbird (default):** to a temporary server on your own computer (`http://127.0.0.1`). zele exchanges the code with Google directly. zele.sh is not involved.
+- **zele's own client:** zele.sh is the OAuth web client. zele opens a zele.sh page that shows a short code (also printed in your terminal) and sends you to Google. Google sends the one-time code to `https://zele.sh/oauth/google/callback`, so login also works when the browser runs on another device. zele.sh keeps **only that code**, for at most 10 minutes, until zele on your computer collects it, then deletes it. zele then sends the code and the PKCE verifier to zele.sh, which adds zele's client secret and forwards them to Google. Refreshing an expired access token works the same way. Your **tokens pass through zele.sh in transit** and go back to your computer; zele.sh **does not store or log them**. Cloudflare request logs can record the callback address, which contains the one-time code; the code works only once and only with the verifier.
 
-With either client, your **tokens and mail never reach zele.sh**.
+With either client, all Gmail and Calendar requests go **directly from your computer to Google**. No mail or calendar content reaches zele.sh.
 
 ### How zele uses it
 
@@ -59,7 +59,7 @@ zele uses Google user data **only to provide the features you run** in the CLI a
 - zele does **not** use Google user data for advertising.
 - zele does **not** sell Google user data.
 - zele does **not** use Google user data to develop, improve or train generalized AI or machine learning models.
-- **No person** at zele reads your Google user data. We never receive it.
+- **No person** at zele reads your Google user data. We never receive your mail or calendar data, and we never store your tokens.
 
 ### Where it is stored
 
@@ -74,11 +74,12 @@ Cached entries expire and are fetched again from Google. Nothing in this file is
 
 ### Sharing and transfers
 
-We do not receive your Google user data, so **we do not share it** with anyone. Data only leaves your computer in these cases, and only when you start them:
+We do not receive your mail or calendar data and do not store your tokens, so **we do not share them** with anyone. Data only leaves your computer in these cases, and only when you start them:
 
 - **Requests to Google.** Every Gmail and Calendar command calls Google APIs directly.
 - **Actions you ask for.** When you send, reply or forward, the message goes to the recipients you choose. When you unsubscribe from a mailing list, zele contacts the unsubscribe address or URL that the sender put in the message.
 - **Your AI agent.** zele prints results to your terminal. If you run zele inside an AI agent or script, that tool receives the output under its own terms. zele does not send data to any AI provider itself.
+- **Login with zele's own client.** The one-time authorization code and your OAuth tokens pass through zele.sh in transit, as described in [How login works](#how-login-works). They are not stored or logged.
 - **zele.sh sign-in.** If you run `zele login zele` with a Gmail account that is already connected, zele searches that Gmail account for the sign-in code email from `noreply@zele.sh`. It sends **only your Gmail address and that code** to zele.sh to sign you in. No other Gmail content is sent.
 
 ### Deleting your data
