@@ -22,10 +22,18 @@ import { getDb, schema } from './db.js'
 import { GmailClient } from './gmail-client.js'
 import { CalendarClient } from './calendar-client.js'
 import * as errore from 'errore'
-import { AuthError, UnsupportedError, ZeleShSignedOutError } from './api-utils.js'
+import { AuthError, GoogleTokenError, UnsupportedError, ZeleShSignedOutError } from './api-utils.js'
 import { ImapSmtpClient, imapTlsOptions, tlsSocketOptions } from './imap-smtp-client.js'
-import { ZeleShApi, ZeleShClient } from './zele-sh-client.js'
-import { createPkce, waitForOAuthCode, type BrowserAuthOptions } from './oauth-callback-server.js'
+import { ZeleShApi, ZeleShClient, resolveZeleApiUrl } from './zele-sh-client.js'
+import {
+  createPkce,
+  exchangeZeleShGoogleCode,
+  printStderr,
+  refreshZeleShGoogleToken,
+  waitForOAuthCode,
+  waitForZeleShOAuthCode,
+  type BrowserAuthOptions,
+} from './oauth-callback-server.js'
 import {
   buildMicrosoftAuthUrl,
   emailFromIdToken,
@@ -94,21 +102,24 @@ export function hasCapability(capabilities: string | AccountCapability[], cap: A
 // ---------------------------------------------------------------------------
 // Google OAuth clients
 //
-// All are Desktop app clients: Google redirects to a loopback server on
-// 127.0.0.1 with any port (oauth-callback-server.ts), and every login sends
-// PKCE S256 and a random state. Google does not treat desktop client secrets
-// as confidential, so they are embedded, like Thunderbird does.
-// https://developers.google.com/identity/protocols/oauth2/native-app
+// Every login sends PKCE S256 and a random state.
+//
+// - redirect 'loopback': third-party Desktop clients. Google redirects to 127.0.0.1
+//   on any port (waitForOAuthCode). Their secrets are embedded, like Thunderbird does:
+//   Google does not treat Desktop client secrets as confidential.
+//   https://developers.google.com/identity/protocols/oauth2/native-app
+// - redirect 'zele.sh': zele's Web client. zele.sh is the OAuth web client: it holds
+//   the client secret and the scopes (website/src/oauth-handoff.ts). The CLI polls it
+//   for the code and exchanges and refreshes tokens through it. Works across machines.
+//   The secret must never be in this package.
 //
 // Pick one with ZELE_GOOGLE_CLIENT=<name>. Default is thunderbird until Google
 // approves the zele client's restricted scopes (docs/google-oauth-verification.md).
 // ---------------------------------------------------------------------------
 
-interface GoogleOAuthClient {
-  clientId: string
-  clientSecret: string
-  scopes: string[]
-}
+type GoogleOAuthClient =
+  | { redirect: 'loopback'; clientId: string; clientSecret: string; scopes: string[] }
+  | { redirect: 'zele.sh'; clientId: string }
 
 /** Scopes the third-party clients can grant. They cannot grant gmail.settings.basic. */
 const THIRD_PARTY_CLIENT_SCOPES = [
@@ -121,6 +132,7 @@ const OAUTH_CLIENTS: Record<string, GoogleOAuthClient> = {
   // Mozilla Thunderbird — largest user base, highest Google quota.
   // Source: searchfox.org/comm-central/source/mailnews/base/src/OAuth2Providers.sys.mjs
   thunderbird: {
+    redirect: 'loopback',
     clientId: '406964657835-aq8lmia8j95dhl1a2bvharmfk3t1hgqj.apps.googleusercontent.com',
     clientSecret: 'kSmqreRr0qwBWJgbf5Y-PjSU',
     scopes: THIRD_PARTY_CLIENT_SCOPES,
@@ -128,6 +140,7 @@ const OAUTH_CLIENTS: Record<string, GoogleOAuthClient> = {
   // GNOME Online Accounts — used by Evolution, GNOME Calendar, Nautilus (Drive).
   // Source: github.com/GNOME/gnome-online-accounts/blob/master/meson_options.txt
   gnome: {
+    redirect: 'loopback',
     clientId: '44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com',
     clientSecret: '-gMLuQyDiI0XrQS_vx_mhuYF',
     scopes: THIRD_PARTY_CLIENT_SCOPES,
@@ -135,23 +148,22 @@ const OAUTH_CLIENTS: Record<string, GoogleOAuthClient> = {
   // KDE KAccounts — used by KMail, KOrganizer, Kontact.
   // Source: github.com/KDE/kaccounts-providers google.provider.in
   kde: {
+    redirect: 'loopback',
     clientId: '317066460457-pkpkedrvt2ldq6g2hj1egfka2n7vpuoo.apps.googleusercontent.com',
     clientSecret: 'Y8eFAaWfcanV3amZdDvtbYUq',
     scopes: THIRD_PARTY_CLIENT_SCOPES,
   },
-  // zele's own Desktop client in Google Cloud project zele-sh. Unverified for now.
+  // zele's own Web client "zele-web" in Google Cloud project zele-sh. Unverified for now.
   zele: {
-    clientId: '701207960653-cd08in62hjsld2ftk39eg8u6h7vrlqes.apps.googleusercontent.com',
-    clientSecret: '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',
-    scopes: [
-      'https://www.googleapis.com/auth/gmail.modify',
-      'https://www.googleapis.com/auth/gmail.settings.basic',
-      'https://www.googleapis.com/auth/calendar',
-    ],
+    redirect: 'zele.sh',
+    clientId: '701207960653-cfdhpbiuu7erfp04j5icc3921lvm2lcr.apps.googleusercontent.com',
   },
 }
 
 const DEFAULT_GOOGLE_CLIENT = 'thunderbird'
+
+/** zele.sh token exchange and refresh give up after this. */
+const TOKEN_REQUEST_TIMEOUT_MS = 30_000
 
 /** Client used for new logins: ZELE_GOOGLE_CLIENT, else thunderbird. */
 function selectGoogleClient(): GoogleOAuthClient | Error {
@@ -167,9 +179,48 @@ function googleClientForAppId(appId: string): GoogleOAuthClient | undefined {
   return Object.values(OAUTH_CLIENTS).find((c) => c.clientId === appId)
 }
 
-/** The redirect URI is per login (random loopback port), so it is passed per call, not here. */
-function createOAuth2Client(client: GoogleOAuthClient): OAuth2Client {
-  return new OAuth2Client({ clientId: client.clientId, clientSecret: client.clientSecret })
+/**
+ * OAuth2Client with stored tokens. zele.sh clients get no refresh_token on the client:
+ * google-auth-library then calls refreshHandler on expiry instead of refreshing with
+ * Google directly, which would need the client secret only zele.sh has.
+ */
+function createGoogleAuth({ client, tokens, email, onRefresh }: {
+  client: GoogleOAuthClient
+  tokens: GoogleTokens
+  email: string
+  onRefresh?: (tokens: GoogleTokens) => void
+}): OAuth2Client {
+  if (client.redirect === 'loopback') {
+    const oauth2Client = new OAuth2Client({ clientId: client.clientId, clientSecret: client.clientSecret })
+    oauth2Client.setCredentials(tokens)
+    return oauth2Client
+  }
+
+  const oauth2Client = new OAuth2Client({ clientId: client.clientId })
+  const { refresh_token: refreshToken, ...accessOnly } = tokens
+  oauth2Client.setCredentials(accessOnly)
+
+  // refreshHandler is a google-auth-library callback, so failures are thrown. gmailBoundary
+  // passes the AuthError through. One refresh at a time: parallel Gmail calls share it.
+  const refresh = async () => {
+    const refreshed = refreshToken
+      ? await refreshZeleShGoogleToken({ apiUrl: resolveZeleApiUrl(), refreshToken, signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS) })
+      : new GoogleTokenError({ oauthError: 'invalid_grant', description: 'no refresh token stored' })
+    if (refreshed instanceof GoogleTokenError && refreshed.oauthError === 'invalid_grant') {
+      throw new AuthError({ email, reason: 'Google sign-in expired or was revoked. Run: zele login', cause: refreshed })
+    }
+    if (refreshed instanceof Error) throw refreshed
+    onRefresh?.({ ...tokens, ...refreshed })
+    return { access_token: refreshed.access_token, expiry_date: refreshed.expiry_date }
+  }
+  let inflight: ReturnType<typeof refresh> | null = null
+  oauth2Client.refreshHandler = () => {
+    inflight ??= refresh().finally(() => {
+      inflight = null
+    })
+    return inflight
+  }
+  return oauth2Client
 }
 
 // ---------------------------------------------------------------------------
@@ -198,41 +249,13 @@ export async function login(
 ): Promise<{ email: string; appId: string; client: GmailClient } | Error> {
   const googleClient = selectGoogleClient()
   if (googleClient instanceof Error) return googleClient
-  const oauth2Client = createOAuth2Client(googleClient)
-  const { verifier, challenge } = createPkce()
+  const pkce = createPkce()
 
-  const grant = await waitForOAuthCode({
-    buildAuthUrl: ({ redirectUri, state }) =>
-      oauth2Client.generateAuthUrl({
-        access_type: 'offline',
-        scope: googleClient.scopes,
-        prompt: 'consent',
-        redirect_uri: redirectUri,
-        state,
-        code_challenge: challenge,
-        code_challenge_method: CodeChallengeMethod.S256,
-      }),
-    loginCommand: 'zele login',
-    provider: 'Google',
-    openBrowser: options?.openBrowser,
-    allowManualCodeEntry: options?.allowManualCodeEntry,
-    showInstructions: options?.showInstructions,
-    onAuthorizationUrl: options?.onAuthorizationUrl,
-  })
-  if (grant instanceof Error) return grant
-
-  if (options?.showInstructions ?? true) {
-    console.error(pc.dim('Got authorization code, exchanging for tokens...'))
-  }
-
-  const tokenResponse = await errore.tryAsync({
-    try: () => oauth2Client.getToken({ code: grant.code, codeVerifier: verifier, redirect_uri: grant.redirectUri }),
-    catch: (err) => new Error('Failed to exchange authorization code for tokens', { cause: err }),
-  })
-  if (tokenResponse instanceof Error) return tokenResponse
-
-  const { tokens } = tokenResponse
-  oauth2Client.setCredentials(tokens)
+  const tokens = googleClient.redirect === 'zele.sh'
+    ? await googleTokensViaZeleSh({ pkce, options })
+    : await googleTokensViaLoopback({ client: googleClient, pkce, options })
+  if (tokens instanceof Error) return tokens
+  const oauth2Client = createGoogleAuth({ client: googleClient, tokens, email: 'unknown' })
 
   // Discover email
   const client = new GmailClient({ auth: oauth2Client })
@@ -278,6 +301,68 @@ export async function login(
   if (upsertResult instanceof Error) return upsertResult
 
   return { email, appId: googleClient.clientId, client }
+}
+
+type Pkce = { verifier: string; challenge: string }
+
+function printExchanging(options?: BrowserAuthOptions) {
+  if (options?.showInstructions ?? true) printStderr(pc.dim('Got authorization code, exchanging for tokens...'))
+}
+
+/** zele client: zele.sh shows the consent link, relays the code, and adds the client secret to the exchange. */
+async function googleTokensViaZeleSh({ pkce, options }: { pkce: Pkce; options?: BrowserAuthOptions }) {
+  const apiUrl = resolveZeleApiUrl()
+  const grant = await waitForZeleShOAuthCode({
+    apiUrl,
+    challenge: pkce.challenge,
+    loginCommand: 'zele login',
+    openBrowser: options?.openBrowser,
+    showInstructions: options?.showInstructions,
+    onAuthorizationUrl: options?.onAuthorizationUrl,
+  })
+  if (grant instanceof Error) return grant
+  printExchanging(options)
+  return exchangeZeleShGoogleCode({
+    apiUrl,
+    code: grant.code,
+    codeVerifier: pkce.verifier,
+    signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
+  })
+}
+
+/** Third-party Desktop clients: loopback redirect, token exchange straight with Google. */
+async function googleTokensViaLoopback({ client, pkce, options }: {
+  client: Extract<GoogleOAuthClient, { redirect: 'loopback' }>
+  pkce: Pkce
+  options?: BrowserAuthOptions
+}): Promise<GoogleTokens | Error> {
+  const oauth2Client = new OAuth2Client({ clientId: client.clientId, clientSecret: client.clientSecret })
+  const grant = await waitForOAuthCode({
+    buildAuthUrl: ({ redirectUri, state }) =>
+      oauth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: client.scopes,
+        prompt: 'consent',
+        redirect_uri: redirectUri,
+        state,
+        code_challenge: pkce.challenge,
+        code_challenge_method: CodeChallengeMethod.S256,
+      }),
+    loginCommand: 'zele login',
+    provider: 'Google',
+    openBrowser: options?.openBrowser,
+    allowManualCodeEntry: options?.allowManualCodeEntry,
+    showInstructions: options?.showInstructions,
+    onAuthorizationUrl: options?.onAuthorizationUrl,
+  })
+  if (grant instanceof Error) return grant
+  printExchanging(options)
+  const res = await errore.tryAsync({
+    try: () => oauth2Client.getToken({ code: grant.code, codeVerifier: pkce.verifier, redirect_uri: grant.redirectUri }),
+    catch: (err) => new Error('Failed to exchange authorization code for tokens', { cause: err }),
+  })
+  if (res instanceof Error) return res
+  return res.tokens
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +545,7 @@ export async function loginMicrosoft(
   if (grant instanceof Error) return grant
 
   if (options?.showInstructions ?? true) {
-    console.error(pc.dim('Got authorization code, exchanging for tokens...'))
+    printStderr(pc.dim('Got authorization code, exchanging for tokens...'))
   }
 
   const oauth = await exchangeMicrosoftCode({ code: grant.code, verifier, redirectUri: grant.redirectUri })
@@ -637,20 +722,26 @@ async function authenticateAccount(account: AccountId): Promise<OAuth2Client> {
     })
   }
   const tokens: GoogleTokens = JSON.parse(row.tokens)
-  const oauth2Client = createOAuth2Client(googleClient)
-  oauth2Client.setCredentials(tokens)
+  const saveTokens = (next: GoogleTokens) => {
+    db.update(schema.account)
+      .set({ tokens: JSON.stringify(next), updatedAt: new Date() })
+      .where(orm.and(orm.eq(schema.account.email, account.email), orm.eq(schema.account.appId, account.appId)))
+      .run()
+  }
+  // zele.sh clients refresh lazily through refreshHandler, which saves the new token.
+  if (googleClient.redirect === 'zele.sh') {
+    return createGoogleAuth({ client: googleClient, tokens, email: account.email, onRefresh: saveTokens })
+  }
+  const oauth2Client = createGoogleAuth({ client: googleClient, tokens, email: account.email })
 
   // Refresh if expired — merge to preserve refresh_token which Google
   // often omits from refresh responses
   if (tokens.expiry_date && tokens.expiry_date < Date.now()) {
-    console.error(pc.dim(`Token expired for ${account.email}, refreshing...`))
+    printStderr(pc.dim(`Token expired for ${account.email}, refreshing...`))
     const { credentials } = await oauth2Client.refreshAccessToken()
     const merged = { ...tokens, ...credentials }
     oauth2Client.setCredentials(merged)
-    db.update(schema.account)
-      .set({ tokens: JSON.stringify(merged), updatedAt: new Date() })
-      .where(orm.and(orm.eq(schema.account.email, account.email), orm.eq(schema.account.appId, account.appId)))
-      .run()
+    saveTokens(merged)
   }
 
   return oauth2Client

@@ -32,8 +32,9 @@ async function runBrowserOAuth(
       openBrowser: false,
       allowManualCodeEntry: false,
       showInstructions: false,
-      onAuthorizationUrl: (url) => {
-        ctx.daemon.publishStartupMessage(`Open this URL to authorize:\n${url}\n`, { stream: 'stderr' })
+      onAuthorizationUrl: (url, confirmCode) => {
+        const check = confirmCode ? `Check that the browser shows code ${confirmCode} before you continue to Google.\n` : ''
+        ctx.daemon.publishStartupMessage(`Open this URL to authorize:\n${url}\n${check}`, { stream: 'stderr' })
         ctx.daemon.ready()
       },
     })

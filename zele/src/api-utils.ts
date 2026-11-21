@@ -90,6 +90,12 @@ export class AuthError extends errore.createTaggedError({
   message: 'Authentication failed for $email: $reason',
 }) {}
 
+/** Google token endpoint error relayed by zele.sh (code exchange or refresh). `oauthError` is Google's `error`, e.g. invalid_grant. */
+export class GoogleTokenError extends errore.createTaggedError({
+  name: 'GoogleTokenError',
+  message: 'Google token request failed ($oauthError): $description',
+}) {}
+
 /** Returned before a Gmail call when the stored token does not grant a scope the call needs. */
 export class MissingScopeError extends errore.createTaggedError({
   name: 'MissingScopeError',

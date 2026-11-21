@@ -332,7 +332,10 @@ function isExpired(createdAt: Date, ttlMs: number): boolean {
 function gmailBoundary<T>(email: string, fn: () => Promise<T>) {
   return errore.tryAsync({
     try: fn,
-    catch: (err) => isAuthLikeError(err)
+    // AuthError comes from the zele.sh refreshHandler in auth.ts, already with a login hint.
+    catch: (err) => err instanceof AuthError
+      ? err
+      : isAuthLikeError(err)
       ? new AuthError({ email, reason: String(err) })
       : new ApiError({ reason: String(err), cause: err }),
   })

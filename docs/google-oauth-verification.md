@@ -1,11 +1,11 @@
 ---
 title: Google OAuth verification
-description: Scopes zele requests from its own Google Cloud project (zele-sh), why each one is needed, and the Gmail API methods each scope covers.
+description: Scopes zele requests from its own Google Cloud project (zele-sh), how login works with zele.sh as the OAuth web client, why each scope is needed, and the Gmail API methods each scope covers.
 ---
 
 # Google OAuth verification
 
-zele's own OAuth app lives in the Google Cloud project **zele** (`zele-sh`, owner `t.de.rossi.01@gmail.com`). The client `zele` is a **Desktop app** client (`701207960653-cd08in62...`), branding is verified. The secret is in Sigillo (project `01M4DYDQ7R71RABP4437D4XFVT`, env `dev`, `ZELE_CLIENT_SECRET`) and embedded in `zele/src/auth.ts`.
+zele's own OAuth app lives in the Google Cloud project **zele** (`zele-sh`, owner `t.de.rossi.01@gmail.com`). The client `zele-web` is a **Web application** client (`701207960653-cfdhpbiu...`), branding is verified. Registered redirect URIs: `https://zele.sh/oauth/google/callback` and `https://preview.zele.sh/oauth/google/callback`. The secret is in Sigillo (project `01M4DYDQ7R71RABP4437D4XFVT`, env `dev`, `ZELE_WEB_CLIENT_SECRET`) and set as the Worker secret `ZELE_WEB_CLIENT_SECRET` on zele.sh and preview.zele.sh. It is **never** in the CLI or the npm package: a search of `zele/` for the `GOC` + `SPX-` secret prefix must find nothing.
 
 The Thunderbird client stays the default until the scopes pass review. Do not advertise the zele client in the README or in CLI hints before that. Try it with:
 
@@ -15,26 +15,62 @@ ZELE_GOOGLE_CLIENT=zele zele login --method google
 
 ## Login flow
 
-zele is a **local client application**: the authorization code, tokens and Gmail or Calendar data never reach zele.sh, so no CASA audit is needed. All Google clients use the same installed-app flow ([RFC 8252](https://datatracker.ietf.org/doc/html/rfc8252), [Google docs](https://developers.google.com/identity/protocols/oauth2/native-app)):
+Every login uses PKCE S256 and a random state ([RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636)). The flow depends on the client (`redirect` in `OAUTH_CLIENTS`, `zele/src/auth.ts`).
+
+### zele client: zele.sh is the OAuth web client
+
+zele.sh holds the client secret and the scopes; the CLI holds the PKCE verifier. Neither can get tokens alone. The browser can run on any machine and nothing is pasted.
+
+```
+zele login (CLI)                     browser (any device)           zele.sh Worker
+────────────────                     ────────────────────           ──────────────
+state, PKCE verifier + challenge
+print/open /oauth/google/start ───►  confirm page "ABC-123"  ◄────  code from sha256(state)
+print "check code ABC-123"           Continue to Google ─────────►  Google consent
+                                     Google 302 /callback ───────►  OAuthHandoff DO
+                                     "Login complete"               keeps code ≤ 10 min
+POST /poll {state} every 2s ─────────────────────────────────────►  pending, or code once
+POST /token {code, verifier} ────────────────────────────────────►  + secret ──► Google
+tokens  ◄─────────────────────── in transit, not stored ◄─────────  Google's JSON body
+saved in ~/.zele/sqlite.db
+on expiry: POST /refresh {refreshToken} ─────────────────────────►  + secret ──► Google
+```
+
+Routes: `/oauth/google/start`, `/oauth/google/callback`, and `/api/v1/oauth/google/{poll,token,refresh}`.
+
+- `GET /oauth/google/start` validates state and challenge and builds Google's authorize URL with constants (client id, scopes, `access_type=offline`, `prompt=consent`, S256, `redirect_uri=${BETTER_AUTH_URL}/oauth/google/callback`). It stores nothing.
+- The confirm code (first 6 base32 chars of sha256(state), `ABC-DEF`) is printed by the CLI and shown on the start page, so a user can spot a login link someone else started.
+- The `OAuthHandoff` Durable Object (`idFromName(sha256(state))`) returns the code once and deletes itself with an alarm 10 minutes after the callback.
+- The token and refresh routes forward Google's JSON body as-is. They store and log nothing; on failure they return only `error` and `error_description`.
+- Worker request logs (observability) record the callback URL, which contains the one-time code. The code is single-use and useless without the verifier.
+- Rate limits per `cf-connecting-ip`: poll 120/min, token and refresh 30/min, start and callback 20/min.
+- In the CLI, zele-client accounts keep no `refresh_token` on the `OAuth2Client`, so google-auth-library calls `refreshHandler` on expiry. It refreshes through zele.sh, saves the new access token, and maps `invalid_grant` to `AuthError` ("Run: zele login").
+- `ZELE_API_URL=https://preview.zele.sh` uses the preview Worker (its callback is also registered).
+- Code: `website/src/oauth-handoff.ts`; `waitForZeleShOAuthCode`, `exchangeZeleShGoogleCode`, `refreshZeleShGoogleToken` in `zele/src/oauth-callback-server.ts`; `createGoogleAuth` in `zele/src/auth.ts`.
+
+### Third-party clients and Microsoft: loopback
+
+Thunderbird, GNOME and KDE are Desktop clients, so they redirect to the user's own computer ([RFC 8252](https://datatracker.ietf.org/doc/html/rfc8252)):
 
 ```
 zele login (CLI)                                      browser (same machine)
 ────────────────                                      ──────────────────────
 listen on http://127.0.0.1:<random port>
-state = 32 random bytes, PKCE verifier + S256 challenge
-print/open auth URL (redirect_uri, state, challenge) ──►  Google consent
-                                                          Google 302 ?code&state
-loopback server checks state, gets code  ◄──────────────  GET http://127.0.0.1:<port>/
+state + PKCE challenge in auth URL ─────────────────►  Google consent
+                                                       Google 302 ?code&state
+loopback server checks state, gets code  ◄───────────  GET http://127.0.0.1:<port>/
 code + verifier + client secret + redirect_uri ──►  Google token endpoint
-tokens saved in ~/.zele/sqlite.db
 ```
 
-- Desktop clients accept any port on the loopback address, so zele never needs a fixed port. Thunderbird does the same with its clients.
+- Desktop clients accept any port on the loopback address. Thunderbird does the same.
 - Browser on another machine: the 127.0.0.1 page does not load. The user pastes the redirect URL from the address bar; zele checks its `state` the same way.
-- Google does not treat Desktop client secrets as confidential. PKCE and the state protect the flow.
-- Logging in with one client deletes the Google rows of the same email from other clients (`login` in `auth.ts`).
-- Code: `zele/src/auth.ts` (`OAUTH_CLIENTS`, `login`), `zele/src/oauth-callback-server.ts` (`waitForOAuthCode`, `createPkce`).
-- The earlier hosted flow (Web client, code handed through `zele.sh/oauth/google/callback`) is removed. Its D1 table `oauth_handoff` is dropped by `website/drizzle/20261120130609_drop_oauth_handoff`.
+- Google does not treat Desktop client secrets as confidential, so these third-party secrets are embedded, like Thunderbird does.
+- Code: `waitForOAuthCode` in `zele/src/oauth-callback-server.ts`.
+
+### Both flows
+
+- Logging in with one client deletes the Google rows of the same email from other clients (`login` in `zele/src/auth.ts`).
+- Accounts saved with the old `zele` Desktop client (`701207960653-cd08in62...`, never published) fail with the existing "Run: zele login" message and are replaced by the next login.
 
 ## Scopes
 
@@ -57,7 +93,7 @@ Not requested:
 
 **calendar.** `zele cal` lists the user's calendars and events, creates, edits and deletes events, and answers invitations. zele talks to Google Calendar over CalDAV, which requires full calendar access. A read-only scope cannot create events or send RSVPs.
 
-**Data handling.** zele runs on the user's computer. OAuth tokens and cached mail stay in `~/.zele/sqlite.db` on that machine. No Google user data is sent to zele.sh or any other server. Login uses a loopback redirect to the user's own computer with PKCE. Privacy policy: https://zele.sh/privacy
+**Data handling.** zele runs on the user's computer, and every Gmail and Calendar API call goes directly from there to Google. OAuth tokens and cached mail are stored only in `~/.zele/sqlite.db` on that machine. zele.sh is the OAuth web client: it redirects the user to Google, keeps the one-time authorization code for up to 10 minutes until the CLI collects it, and adds the client secret when the CLI exchanges the code (with its PKCE verifier) or refreshes the access token. Tokens pass through zele.sh in transit and are not stored or logged. No mail or calendar content reaches zele.sh. Privacy policy: https://zele.sh/privacy
 
 ## Gmail methods and accepted scopes
 

@@ -23,10 +23,10 @@
 3. **Gmail web links work as IDs** — commands that take a thread ID also take a Gmail link like `https://mail.google.com/mail/u/0/#inbox/FMfcgz…`, and draft commands take a compose link (`…#drafts?compose=…`). Links are decoded offline, with no API call.
 
 4. **Safer browser login for Google and Microsoft**:
-   - The callback server listens on `127.0.0.1` on a random port instead of `localhost:8089`, so login no longer kills whatever process used port 8089.
-   - Every login sends PKCE and a random state. zele checks the state in the browser redirect and in a pasted redirect URL.
-   - When the browser runs on another machine, paste the **full redirect URL** from the address bar. A bare code is no longer accepted.
-   - Login gives up after 10 minutes, and Ctrl-C cancels it.
+   - Every login sends PKCE and a random state, and checks the state when the code comes back.
+   - The default Google clients (Thunderbird, GNOME, KDE) and Microsoft redirect to a server on `127.0.0.1` on a random port instead of `localhost:8089`, so login no longer kills whatever process used port 8089. When the browser runs on another machine, paste the **full redirect URL** from the address bar. A bare code is no longer accepted.
+   - zele's own Google client (`ZELE_GOOGLE_CLIENT=zele`) logs in through zele.sh, which is its OAuth web client. zele opens a zele.sh page that shows a short code (also printed in the terminal), then Google redirects back to zele.sh and the CLI polls for the one-time code. It works the same on a laptop, over SSH or in an agent, with nothing to paste. zele.sh keeps the code for at most 10 minutes and adds the client secret when the CLI exchanges the code or refreshes the access token, so the secret is not in the npm package. Tokens pass through zele.sh in transit and are not stored or logged. Gmail and Calendar requests still go directly from your computer to Google, and no mail or calendar content reaches zele.sh.
+   - Login gives up after 10 minutes, and Ctrl-C cancels it. Login instructions are no longer printed in red when zele runs on Bun.
    - Logging in to a Google account again replaces the saved login of the same email, so `--account` never matches two entries for one address.
 
    The `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET` overrides are removed. Accounts saved with a custom client must run `zele login` again, or be removed with `zele logout <email>`.
