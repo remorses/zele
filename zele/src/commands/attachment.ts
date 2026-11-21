@@ -7,6 +7,7 @@ import { z } from 'zod'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getClient } from '../auth.js'
+import { parseThreadIdArg } from '../gmail-link.js'
 import { createOutput, type Output } from '../output.js'
 
 export function registerAttachmentCommands(cli: ZeleCli) {
@@ -16,8 +17,11 @@ export function registerAttachmentCommands(cli: ZeleCli) {
 
   cli
     .command('attachment list <threadId>', 'List attachments for all messages in a thread')
-    .action(async (threadId, options, ctx) => {
+    .action(async (threadIdArg, options, ctx) => {
       const out: Output = createOutput(ctx)
+      const threadId = parseThreadIdArg(threadIdArg)
+      if (threadId instanceof Error) out.fail(threadId)
+
       const { client } = await getClient(options.account)
 
       const threadResult = await client.getThread({ threadId })

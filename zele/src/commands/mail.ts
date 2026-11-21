@@ -16,6 +16,7 @@ import type { GmailClient } from '../gmail-client.js'
 import { AuthError, NotFoundError, UnsupportedError } from '../api-utils.js'
 import { getThreadSeenMessageId, setThreadSeenMessageId } from '../db.js'
 import { hasUnsubscribeMechanism, hasOneClickUnsubscribe } from '../unsubscribe.js'
+import { parseThreadIdArg, parseThreadIdArgs } from '../gmail-link.js'
 import { createOutput, formatDate, formatFlags, formatSender, renderEmailBody, type Output } from '../output.js'
 import { REPLY_FOLLOW_UP_HINT, replyWatchCommand } from './watch.js'
 import { colors as pc, type GokeExecutionContext } from 'goke'
@@ -346,12 +347,15 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--raw', 'Show raw message (first message only, single thread)')
     .option('--raw-html', 'Show raw HTML body per message (no markdown conversion)')
     .option('--verify', 'Show expanded authentication details (SPF/DKIM/DMARC) and threading headers')
-    .action(async (threadIds, options, ctx) => {
+    .action(async (threadIdArgs, options, ctx) => {
       const out: Output = createOutput(ctx)
-      if (threadIds.length === 0) {
+      if (threadIdArgs.length === 0) {
         out.error('No thread IDs provided')
         out.exit(1)
       }
+
+      const threadIds = parseThreadIdArgs(threadIdArgs)
+      if (threadIds instanceof Error) out.fail(threadIds)
 
       const { client, email, appId } = await getClient(options.account)
 
@@ -537,6 +541,9 @@ export function registerMailCommands(cli: ZeleCli) {
         out.exit(1)
       }
 
+      const threadId = options.threadId ? parseThreadIdArg(options.threadId) : undefined
+      if (threadId instanceof Error) out.fail(threadId)
+
       let body = options.body ?? ''
       if (options.bodyFile) body = await readBodyFile(out, ctx, options.bodyFile)
 
@@ -556,15 +563,15 @@ export function registerMailCommands(cli: ZeleCli) {
       // --thread-id sends into an existing conversation: recipients default to
       // the thread's counterparty and the In-Reply-To/References headers (plus
       // Gmail's threadId) are derived from it, so the message actually threads.
-      if (options.threadId) {
+      if (threadId) {
         const seenMessageId = await loadSeenMessageId(out, {
           email,
           appId,
-          threadId: options.threadId,
+          threadId,
           force: options.force,
         })
         const result = await client.sendInThread({
-          threadId: options.threadId,
+          threadId,
           to,
           subject: options.subject,
           body,
@@ -584,7 +591,7 @@ export function registerMailCommands(cli: ZeleCli) {
           const marked = await setThreadSeenMessageId({
             email,
             appId,
-            threadId: options.threadId,
+            threadId,
             messageId: result.message.id,
           })
           if (marked instanceof Error) {
@@ -599,7 +606,7 @@ export function registerMailCommands(cli: ZeleCli) {
           bcc: result.bcc,
           recipient_source: result.recipientSource,
         })
-        out.success(`Sent to ${result.to.join(', ')} in thread ${options.threadId}`)
+        out.success(`Sent to ${result.to.join(', ')} in thread ${threadId}`)
         out.hint(REPLY_FOLLOW_UP_HINT)
         out.hint(`Wait for the reply: ${replyWatchCommand({ account: email, to: result.to, subject: options.subject })}`)
         return
@@ -649,8 +656,11 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--draft', 'Save as draft instead of sending')
     .option('--dry-run', 'Print the resolved recipients and headers without sending')
     .option('--force', 'Reply even if the latest message was not read')
-    .action(async (threadId, options, ctx) => {
+    .action(async (threadIdArg, options, ctx) => {
       const out: Output = createOutput(ctx)
+      const threadId = parseThreadIdArg(threadIdArg)
+      if (threadId instanceof Error) out.fail(threadId)
+
       // --dry-run answers "who would this reply go to?" before committing to send.
       if (options.dryRun) {
         const { client } = await getClient(options.account)
@@ -782,12 +792,15 @@ export function registerMailCommands(cli: ZeleCli) {
     .option('--body <body>', z.string().describe('Optional message to prepend'))
     .option('--from <from>', z.string().describe('Send-as alias email'))
     .option('--draft', 'Save as draft instead of sending')
-    .action(async (threadId, options, ctx) => {
+    .action(async (threadIdArg, options, ctx) => {
       const out: Output = createOutput(ctx)
       if (!options.to) {
         out.error('--to is required')
         out.exit(1)
       }
+
+      const threadId = parseThreadIdArg(threadIdArg)
+      if (threadId instanceof Error) out.fail(threadId)
 
       const recipients = options.to
         .split(',')
