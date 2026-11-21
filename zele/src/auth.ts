@@ -22,7 +22,18 @@ import { getDb, schema } from './db.js'
 import { GmailClient } from './gmail-client.js'
 import { CalendarClient } from './calendar-client.js'
 import * as errore from 'errore'
-import { AuthError, GoogleTokenError, UnsupportedError, ZeleShSignedOutError } from './api-utils.js'
+import {
+  AccountRequiredError,
+  AuthError,
+  GoogleTokenError,
+  isNotFoundError,
+  mapConcurrent,
+  NotFoundError,
+  ThreadInManyAccountsError,
+  UnsupportedError,
+  ZeleShSignedOutError,
+} from './api-utils.js'
+import { isGmailId } from './gmail-link.js'
 import { ImapSmtpClient, imapTlsOptions, tlsSocketOptions } from './imap-smtp-client.js'
 import { ZeleShApi, ZeleShClient, resolveZeleApiUrl } from './zele-sh-client.js'
 import {
@@ -834,6 +845,67 @@ export async function getClient(
   throw new Error(
     `Multiple accounts matched. Specify --account:\n  ${emails}`,
   )
+}
+
+/**
+ * Find the account that holds each thread, in the order given. With --account
+ * or a single account, every thread goes to that account. Otherwise Gmail IDs
+ * are looked up in each Google account. See pickThreadClient.
+ */
+export async function getClientsForThreads(
+  accounts: string[] | undefined,
+  threadIds: string[],
+): Promise<Array<ClientEntry | Error>> {
+  const clients = await getClients(accounts)
+  // Wrapped so one failed lookup doesn't stop mapConcurrent: mail read reports each thread on its own.
+  const picked = await mapConcurrent(threadIds, async (threadId) => ({
+    entry: await pickThreadClient(clients, threadId),
+  }))
+  return picked.map(({ entry }) => entry)
+}
+
+/**
+ * Pick the client whose mailbox has the thread. Only Gmail IDs can identify an
+ * account: IMAP "FOLDER:UID" IDs repeat between mailboxes, so a lookup could
+ * trash or reply to another account's message.
+ */
+export async function pickThreadClient<
+  T extends {
+    email: string
+    accountType: AccountType
+    client: { getThread(opts: { threadId: string; skipCache?: boolean; headersOnly?: boolean }): Promise<unknown> }
+  },
+>(clients: T[], threadId: string): Promise<T | Error> {
+  if (clients.length === 1) return clients[0]!
+
+  const google = isGmailId(threadId) ? clients.filter((c) => c.accountType === 'google') : []
+  if (google.length === 0) {
+    return new AccountRequiredError({ accounts: clients.map((c) => c.email).join(', ') })
+  }
+  if (google.length === 1) return google[0]!
+
+  // skipCache: a cached copy does not prove the thread still exists in that mailbox.
+  const results = await Promise.all(
+    google.map((entry) => entry.client.getThread({ threadId, skipCache: true, headersOnly: true })),
+  )
+  const found = google.filter((_, i) => !(results[i] instanceof Error))
+  if (found.length === 1) return found[0]!
+  if (found.length > 1) {
+    return new ThreadInManyAccountsError({ threadId, accounts: found.map((c) => c.email).join(', ') })
+  }
+  // A failure other than a 404 may be hiding the thread, so report it instead of "not found".
+  const failure = results.find((r): r is Error => r instanceof Error && !isNotFoundError(r))
+  if (failure) return failure
+  return new NotFoundError({ resource: `thread ${threadId} (searched ${google.map((c) => c.email).join(', ')})` })
+}
+
+/** Find the account that holds one thread. See getClientsForThreads. */
+export async function getClientForThread(
+  accounts: string[] | undefined,
+  threadId: string,
+): Promise<ClientEntry | Error> {
+  const [entry] = await getClientsForThreads(accounts, [threadId])
+  return entry!
 }
 
 /**
