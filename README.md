@@ -319,7 +319,12 @@ zele label delete <label-id>
 
 ```bash
 zele mail filter list
+zele mail filter create --from news@example.com --add-label Newsletters --archive
+zele mail filter create --subject "invoice" --star --mark-read
+zele mail filter delete <filter-id>
 ```
+
+Creating and deleting filters needs the `gmail.settings.basic` Gmail scope. The default Google login cannot grant it yet, so `create` and `delete` fail with a message that links to the Gmail filter settings. Listing filters works with every login.
 
 ### Calendar (Google only)
 

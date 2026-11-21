@@ -90,12 +90,18 @@ export class AuthError extends errore.createTaggedError({
   message: 'Authentication failed for $email: $reason',
 }) {}
 
-/** Returned when a requested resource doesn't exist (calendar, event, thread, draft, label). */
+/** Returned before a Gmail call when the stored token does not grant a scope the call needs. */
+export class MissingScopeError extends errore.createTaggedError({
+  name: 'MissingScopeError',
+  message: '$email has not granted the $scope scope. $hint',
+}) {}
+
 export class ZeleShSignedOutError extends errore.createTaggedError({
   name: 'ZeleShSignedOutError',
   message: 'Not signed in to $apiUrl. Run: zele login zele',
 }) {}
 
+/** Returned when a requested resource doesn't exist (calendar, event, thread, draft, label). */
 export class NotFoundError extends errore.createTaggedError({
   name: 'NotFoundError',
   message: '$resource not found',
@@ -192,13 +198,6 @@ export function isAuthLikeError(err: unknown): boolean {
   if (status === 403 && !isRateLimitError(e) && !isBackendError(e)) return true
   const msg = String(err)
   return msg.includes('Invalid credentials') || msg.includes('Unauthorized') || msg.includes('invalid_grant')
-}
-
-/** Check if an error is specifically about missing OAuth scopes (not expired tokens or revoked access).
- *  When true, the user needs to `zele login` again to grant the new scope. */
-export function isScopeError(err: unknown): boolean {
-  const msg = String(err)
-  return msg.includes('insufficient authentication scopes') || msg.includes('Insufficient Permission')
 }
 
 

@@ -13,7 +13,7 @@ import type { OAuth2Client } from 'googleapis-common'
 import { createMimeMessage } from 'mimetext'
 import { parseFrom, parseAddressList, resolveReplyRecipients, replySubject, threadAnchor, checkThreadLatestSeen, type SentInThread, type ThreadReplyEnvelope } from './email-utils.js'
 import * as errore from 'errore'
-import { withRetry, mapConcurrent, isTruthy, AuthError, isAuthLikeError, ApiError, NotFoundError, EmptyThreadError, MissingDataError, ValidationError, abortableSleep, SelfRecipientError, AmbiguousRecipientError, UnseenLatestError } from './api-utils.js'
+import { withRetry, mapConcurrent, isTruthy, AuthError, MissingScopeError, isAuthLikeError, ApiError, NotFoundError, EmptyThreadError, MissingDataError, ValidationError, abortableSleep, SelfRecipientError, AmbiguousRecipientError, UnseenLatestError } from './api-utils.js'
 import { renderEmailBody } from './output.js'
 import * as orm from 'drizzle-orm'
 import { getDb, schema } from './db.js'
@@ -338,6 +338,18 @@ function gmailBoundary<T>(email: string, fn: () => Promise<T>) {
   })
 }
 
+const GMAIL_SETTINGS_BASIC_SCOPE = 'https://www.googleapis.com/auth/gmail.settings.basic'
+/** filters.list accepts any of these. */
+const FILTER_READ_SCOPES = [
+  'https://mail.google.com/',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  GMAIL_SETTINGS_BASIC_SCOPE,
+]
+/** filters.create and filters.delete accept only gmail.settings.basic, even with https://mail.google.com/. */
+const FILTER_WRITE_SCOPES = [GMAIL_SETTINGS_BASIC_SCOPE]
+const FILTER_SCOPE_HINT = 'Manage filters in Gmail settings instead: https://mail.google.com/mail/u/0/#settings/filters'
+
 /**
  * Known folder names that map to Gmail system folders/labels.
  * Used to validate custom label names and prevent query injection.
@@ -444,10 +456,28 @@ export class GmailClient {
   /** Full payloads fetched by this client. Payloads never change, so getAttachment reuses them. */
   private messagePayloads = new Map<string, gmail_v1.Schema$MessagePart>()
   private account: AccountId | null
+  private auth: OAuth2Client
 
   constructor({ auth, account }: { auth: OAuth2Client; account?: AccountId }) {
     this.gmail = gmailApi({ version: 'v1', auth })
+    this.auth = auth
     this.account = account ?? null
+  }
+
+  /** MissingScopeError when the stored token grants none of `scopes`. Tokens without a scope field pass. */
+  private requireScope({ scopes, hint }: { scopes: string[]; hint: string }): MissingScopeError | null {
+    const granted = this.auth.credentials.scope?.split(' ')
+    if (!granted || scopes.some((scope) => granted.includes(scope))) return null
+    return new MissingScopeError({
+      email: this.account?.email ?? 'unknown',
+      scope: scopes.map((scope) => scope.replace('https://www.googleapis.com/auth/', '')).join(' or '),
+      hint,
+    })
+  }
+
+  /** Filter create and delete need gmail.settings.basic, which the default Google client cannot grant. */
+  requireFilterWriteScope(): MissingScopeError | null {
+    return this.requireScope({ scopes: FILTER_WRITE_SCOPES, hint: FILTER_SCOPE_HINT })
   }
 
   // =========================================================================
@@ -1628,7 +1658,9 @@ export class GmailClient {
   // Filters
   // =========================================================================
 
-  async listFilters(): Promise<{ parsed: gmail_v1.Schema$Filter[] } | AuthError | ApiError> {
+  async listFilters(): Promise<{ parsed: gmail_v1.Schema$Filter[] } | MissingScopeError | AuthError | ApiError> {
+    const scopeError = this.requireScope({ scopes: FILTER_READ_SCOPES, hint: 'Log in again with: zele login' })
+    if (scopeError) return scopeError
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() => this.gmail.users.settings.filters.list({ userId: 'me' })),
     )
@@ -1638,18 +1670,24 @@ export class GmailClient {
 
   async createFilter(opts: {
     from?: string
+    to?: string
+    subject?: string
     query?: string
     addLabelIds?: string[]
     removeLabelIds?: string[]
-  }): Promise<gmail_v1.Schema$Filter | AuthError | ApiError> {
+  }): Promise<gmail_v1.Schema$Filter | MissingScopeError | AuthError | ApiError> {
     const criteria: gmail_v1.Schema$FilterCriteria = {}
     if (opts.from) criteria.from = opts.from
+    if (opts.to) criteria.to = opts.to
+    if (opts.subject) criteria.subject = opts.subject
     if (opts.query) criteria.query = opts.query
 
     const action: gmail_v1.Schema$FilterAction = {}
     if (opts.addLabelIds?.length) action.addLabelIds = opts.addLabelIds
     if (opts.removeLabelIds?.length) action.removeLabelIds = opts.removeLabelIds
 
+    const scopeError = this.requireFilterWriteScope()
+    if (scopeError) return scopeError
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() =>
         this.gmail.users.settings.filters.create({
@@ -1663,7 +1701,9 @@ export class GmailClient {
     return res.data
   }
 
-  async deleteFilter(filterId: string): Promise<void | AuthError | ApiError> {
+  async deleteFilter(filterId: string): Promise<void | MissingScopeError | AuthError | ApiError> {
+    const scopeError = this.requireFilterWriteScope()
+    if (scopeError) return scopeError
     const res = await gmailBoundary(this.account?.email ?? 'unknown', () =>
       withRetry(() =>
         this.gmail.users.settings.filters.delete({
