@@ -21,18 +21,31 @@
   // MAIL: raw received emails, gzipped. Key: <userId>/<inbox>/<messageId>.eml.gz
   "r2_buckets": [{ "binding": "MAIL", "bucket_name": "zele-mail" }],
   // INBOX_STORE: one SQLite Durable Object per owner (idFromName(userId)) with message pointers.
+  // OAUTH_HANDOFF: one short-lived SQLite Durable Object per Google login (oauth-handoff.ts).
   "durable_objects": {
-    "bindings": [{ "name": "INBOX_STORE", "class_name": "InboxStore" }]
+    "bindings": [
+      { "name": "INBOX_STORE", "class_name": "InboxStore" },
+      { "name": "OAUTH_HANDOFF", "class_name": "OAuthHandoff" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InboxStore"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["InboxStore"] },
+    { "tag": "v2", "new_sqlite_classes": ["OAuthHandoff"] }
+  ],
   // OTP mails only. Never used for user content.
   "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["noreply@zele.sh"] }],
   "ratelimits": [
     { "name": "OTP_EMAIL_LIMITER", "namespace_id": "2001", "simple": { "limit": 2, "period": 60 } },
-    { "name": "OTP_IP_LIMITER", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } }
+    { "name": "OTP_IP_LIMITER", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } },
+    // Google login relay (oauth-handoff.ts), per cf-connecting-ip.
+    { "name": "OAUTH_POLL_LIMITER", "namespace_id": "2005", "simple": { "limit": 120, "period": 60 } },
+    { "name": "OAUTH_TOKEN_LIMITER", "namespace_id": "2006", "simple": { "limit": 30, "period": 60 } },
+    { "name": "OAUTH_PAGE_LIMITER", "namespace_id": "2007", "simple": { "limit": 20, "period": 60 } }
   ],
   "vars": { "BETTER_AUTH_URL": "https://zele.sh" },
-  "secrets": { "required": ["BETTER_AUTH_SECRET"] },
+  // ZELE_WEB_CLIENT_SECRET: Google Web client zele-web (oauth-handoff.ts). Source: Sigillo project
+  // 01M4DYDQ7R71RABP4437D4XFVT env dev; set with `wrangler secret put` for prod and preview.
+  "secrets": { "required": ["BETTER_AUTH_SECRET", "ZELE_WEB_CLIENT_SECRET"] },
   "routes": [
     { "pattern": "zele.sh", "custom_domain": true },
     { "pattern": "www.zele.sh", "custom_domain": true }
@@ -54,16 +67,25 @@
       ],
       "r2_buckets": [{ "binding": "MAIL", "bucket_name": "zele-mail-preview" }],
       "durable_objects": {
-        "bindings": [{ "name": "INBOX_STORE", "class_name": "InboxStore" }]
+        "bindings": [
+          { "name": "INBOX_STORE", "class_name": "InboxStore" },
+          { "name": "OAUTH_HANDOFF", "class_name": "OAuthHandoff" }
+        ]
       },
-      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InboxStore"] }],
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["InboxStore"] },
+        { "tag": "v2", "new_sqlite_classes": ["OAuthHandoff"] }
+      ],
       "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["noreply@zele.sh"] }],
       "ratelimits": [
         { "name": "OTP_EMAIL_LIMITER", "namespace_id": "2003", "simple": { "limit": 2, "period": 60 } },
-        { "name": "OTP_IP_LIMITER", "namespace_id": "2004", "simple": { "limit": 5, "period": 60 } }
+        { "name": "OTP_IP_LIMITER", "namespace_id": "2004", "simple": { "limit": 5, "period": 60 } },
+        { "name": "OAUTH_POLL_LIMITER", "namespace_id": "2008", "simple": { "limit": 120, "period": 60 } },
+        { "name": "OAUTH_TOKEN_LIMITER", "namespace_id": "2009", "simple": { "limit": 30, "period": 60 } },
+        { "name": "OAUTH_PAGE_LIMITER", "namespace_id": "2010", "simple": { "limit": 20, "period": 60 } }
       ],
       "vars": { "BETTER_AUTH_URL": "https://preview.zele.sh" },
-      "secrets": { "required": ["BETTER_AUTH_SECRET"] },
+      "secrets": { "required": ["BETTER_AUTH_SECRET", "ZELE_WEB_CLIENT_SECRET"] },
       "routes": [{ "pattern": "preview.zele.sh", "custom_domain": true }]
     }
   }

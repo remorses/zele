@@ -1,15 +1,37 @@
-// Browser OAuth for Google and Microsoft login (RFC 8252 loopback redirect).
-// Listens on 127.0.0.1 on a random port, prints and opens the authorize URL, and
-// waits for ?code=&state= on the loopback server or a pasted redirect URL.
+// Browser OAuth for Google and Microsoft login. Two ways to receive the code:
+//
+// - waitForOAuthCode (RFC 8252 loopback): listens on 127.0.0.1 on a random port and
+//   waits for ?code=&state= there or in a pasted redirect URL. Third-party Google
+//   clients and Microsoft.
+// - waitForZeleShOAuthCode (zele's Web client): zele.sh is the OAuth web client. Google
+//   redirects to zele.sh, which keeps the code for this state; the CLI polls for it, then
+//   exchanges it through zele.sh (which adds the client secret) with its PKCE verifier.
+//   Works when the browser runs on another machine.
 
 import http from 'node:http'
 import readline from 'node:readline'
 import { createHash, randomBytes } from 'node:crypto'
 import { colors as pc, openInBrowser } from 'goke'
 import * as errore from 'errore'
+import type { Credentials } from 'google-auth-library'
+import { GoogleTokenError, abortableSleep } from './api-utils.js'
+
+// Bun's console.error paints TTY output red, so login instructions looked like errors.
+export function printStderr(line: string): void {
+  process.stderr.write(line + '\n')
+}
 
 /** Browser logins give up after this. Also the timeout of the background login daemon. */
 export const LOGIN_TIMEOUT_MS = 10 * 60 * 1000
+
+/** How often the CLI asks zele.sh whether the browser login finished. */
+const RELAY_POLL_INTERVAL_MS = 2_000
+
+/** Consecutive failed polls (network errors or 5xx) before login gives up. */
+const MAX_RELAY_POLL_FAILURES = 5
+
+const HTTP_SERVER_ERROR = 500
+const HTTP_TOO_MANY_REQUESTS = 429
 
 /** Google and Microsoft desktop clients accept any port on this loopback address. */
 const LOOPBACK_HOST = '127.0.0.1'
@@ -18,7 +40,8 @@ export interface BrowserAuthOptions {
   openBrowser?: boolean
   allowManualCodeEntry?: boolean
   showInstructions?: boolean
-  onAuthorizationUrl?: (url: string) => void
+  /** Gets the URL to open, and for the zele.sh flow the confirm code the browser shows. */
+  onAuthorizationUrl?: (url: string, confirmCode?: string) => void
 }
 
 /** PKCE S256 pair (RFC 7636). The verifier never leaves this process. */
@@ -250,11 +273,11 @@ export async function waitForOAuthCode(opts: {
   }
 
   if (showInstructions) {
-    console.error('\n' + pc.bold('1.') + ' Open this URL to authorize:\n')
-    console.error('   ' + pc.cyan(pc.underline(authUrl)) + '\n')
-    console.error(pc.bold('2.') + ' If running locally, the browser will redirect automatically.')
-    console.error(pc.dim('   If running remotely, the redirect page won\'t load — that\'s fine.'))
-    console.error(pc.dim('   Just copy the URL from your browser\'s address bar and paste it below.') + '\n')
+    printStderr('\n' + pc.bold('1.') + ' Open this URL to authorize:\n')
+    printStderr('   ' + pc.cyan(pc.underline(authUrl)) + '\n')
+    printStderr(pc.bold('2.') + ' If running locally, the browser will redirect automatically.')
+    printStderr(pc.dim('   If running remotely, the redirect page won\'t load — that\'s fine.'))
+    printStderr(pc.dim('   Just copy the URL from your browser\'s address bar and paste it below.') + '\n')
   }
 
   const result = new Promise<string | Error>((resolve) => {
@@ -359,7 +382,7 @@ export async function waitForOAuthCode(opts: {
         rl?.question(pc.dim('Paste redirect URL here (or wait for auto-redirect): '), (answer) => {
           const pasted = codeFromRedirectUrl({ input: answer, state })
           if (pasted instanceof Error) {
-            console.error(pc.yellow(pasted.message))
+            printStderr(pc.yellow(pasted.message))
             if (!resolved) ask()
             return
           }
@@ -375,4 +398,197 @@ export async function waitForOAuthCode(opts: {
   const code = await result
   if (code instanceof Error) return code
   return { code, redirectUri }
+}
+
+type RelayPollResponse =
+  | { status: 'pending' }
+  | { status: 'code'; code: string }
+  | { status: 'error'; error: string; errorDescription: string | null }
+
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+
+/**
+ * Short code the terminal and the zele.sh start page both show, so the user can tell
+ * a login link they started from one someone sent them. First 6 base32 chars of
+ * sha256(state) as "ABC-DEF". Same as confirmCodeForState in website/src/oauth-handoff.ts.
+ */
+export function confirmCodeForState(state: string): string {
+  const b = createHash('sha256').update(state).digest()
+  const top40Bits = b[0]! * 2 ** 32 + b[1]! * 2 ** 24 + b[2]! * 2 ** 16 + b[3]! * 2 ** 8 + b[4]!
+  const chars = Array.from({ length: 6 }, (_, i) => BASE32[Math.floor(top40Bits / 2 ** (35 - 5 * i)) % 32]).join('')
+  return `${chars.slice(0, 3)}-${chars.slice(3)}`
+}
+
+/**
+ * Google login through zele.sh, the OAuth web client. The browser opens
+ * `<apiUrl>/oauth/google/start` (confirm page, then Google); Google redirects to zele.sh,
+ * and this polls `<apiUrl>/api/v1/oauth/google/poll` until it returns the code (once) or
+ * Google's error. Exchange the code with exchangeZeleShGoogleCode. No local server, no paste.
+ */
+export async function waitForZeleShOAuthCode(opts: {
+  /** https://zele.sh, or https://preview.zele.sh via ZELE_API_URL. */
+  apiUrl: string
+  /** PKCE S256 challenge. The verifier stays with the caller. */
+  challenge: string
+  loginCommand: string
+  openBrowser?: boolean
+  showInstructions?: boolean
+  onAuthorizationUrl?: (url: string, confirmCode?: string) => void
+  pollIntervalMs?: number
+}): Promise<{ code: string } | Error> {
+  const state = randomBytes(32).toString('base64url')
+  const confirmCode = confirmCodeForState(state)
+  const startUrl = `${opts.apiUrl}/oauth/google/start?${new URLSearchParams({ state, code_challenge: opts.challenge })}`
+  const published = errore.tryFn({
+    try: () => opts.onAuthorizationUrl?.(startUrl, confirmCode),
+    catch: (err) => new Error('Failed to start Google login', { cause: err }),
+  })
+  if (published instanceof Error) return published
+
+  if (opts.showInstructions ?? true) {
+    printStderr('\n' + pc.bold('Open this URL to sign in:') + '\n')
+    printStderr('   ' + pc.cyan(pc.underline(startUrl)) + '\n')
+    printStderr(`Check that the browser shows code ${pc.bold(confirmCode)} before you continue to Google.`)
+    printStderr(pc.dim('Any browser works, also on another computer or phone. Waiting for approval... (Ctrl-C cancels)') + '\n')
+  }
+
+  const cancel = new AbortController()
+  const onSigint = () => cancel.abort()
+  process.once('SIGINT', onSigint)
+  const signal = AbortSignal.any([cancel.signal, AbortSignal.timeout(LOGIN_TIMEOUT_MS)])
+
+  if (opts.openBrowser ?? true) await openInBrowser(startUrl)
+  const code = await pollZeleShRelay({
+    apiUrl: opts.apiUrl,
+    state,
+    loginCommand: opts.loginCommand,
+    intervalMs: opts.pollIntervalMs ?? RELAY_POLL_INTERVAL_MS,
+    signal,
+  })
+  process.off('SIGINT', onSigint)
+
+  if (code instanceof Error) return code
+  if (code === null && cancel.signal.aborted) return new Error(`Login cancelled. Run: ${opts.loginCommand}`)
+  if (code === null) return new Error(`Login was not finished within ${LOGIN_TIMEOUT_MS / 60_000} minutes. Run: ${opts.loginCommand}`)
+  return { code }
+}
+
+/** Returns the code, an Error, or null when the signal aborted (cancel or timeout). */
+async function pollZeleShRelay({ apiUrl, state, loginCommand, intervalMs, signal }: {
+  apiUrl: string
+  state: string
+  loginCommand: string
+  intervalMs: number
+  signal: AbortSignal
+}): Promise<string | Error | null> {
+  let failures = 0
+  while (!signal.aborted) {
+    const res = await errore.tryAsync({
+      try: () => fetch(`${apiUrl}/api/v1/oauth/google/poll`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ state }),
+        signal,
+      }),
+      catch: (err) => new Error(`Could not reach ${apiUrl} to finish login`, { cause: err }),
+    })
+    if (signal.aborted) return null
+
+    // Network blips, rate limits and 5xx are retried; a persistent outage fails after a few polls.
+    if (res instanceof Error || res.status >= HTTP_SERVER_ERROR || res.status === HTTP_TOO_MANY_REQUESTS) {
+      failures += 1
+      if (failures >= MAX_RELAY_POLL_FAILURES) {
+        const reason = res instanceof Error ? res.message : `${apiUrl} returned HTTP ${res.status}`
+        return new Error(`${reason}. Run: ${loginCommand}`, { cause: res instanceof Error ? res : undefined })
+      }
+      await abortableSleep(intervalMs, signal)
+      continue
+    }
+    failures = 0
+
+    const body = await errore.tryAsync({
+      try: async () => (await res.json()) as RelayPollResponse & { message?: string },
+      catch: (err) => new Error(`Invalid login relay response from ${apiUrl}`, { cause: err }),
+    })
+    if (signal.aborted) return null
+    if (body instanceof Error) return body
+    if (!res.ok) return new Error(`${body.message ?? `HTTP ${res.status}`}. Run: ${loginCommand}`)
+
+    if (body.status === 'code') return body.code
+    if (body.status === 'error' && body.error === 'access_denied') {
+      return new Error(`Google login was denied in the browser (access_denied). Run: ${loginCommand}`)
+    }
+    if (body.status === 'error') return new Error(`Google login failed: ${body.errorDescription ?? body.error}. Run: ${loginCommand}`)
+    await abortableSleep(intervalMs, signal)
+  }
+  return null
+}
+
+type GoogleTokenBody = {
+  access_token?: string
+  expires_in?: number
+  refresh_token?: string
+  scope?: string
+  token_type?: string
+  id_token?: string
+  error?: string
+  error_description?: string
+  message?: string
+}
+
+/** zele.sh adds the client secret and forwards to Google's token endpoint. Tokens are not stored there. */
+async function zeleShGoogleToken({ apiUrl, path, body, signal }: {
+  apiUrl: string
+  path: string
+  body: Record<string, string>
+  signal: AbortSignal
+}): Promise<(Credentials & { access_token: string; expiry_date: number }) | GoogleTokenError> {
+  const res = await errore.tryAsync({
+    try: () => fetch(`${apiUrl}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    }),
+    catch: (err) => new GoogleTokenError({ oauthError: 'network_error', description: `could not reach ${apiUrl}`, cause: err }),
+  })
+  if (res instanceof Error) return res
+  const data = await errore.tryAsync({
+    try: async () => (await res.json()) as GoogleTokenBody,
+    catch: (err) => new GoogleTokenError({ oauthError: 'invalid_response', description: `${apiUrl} returned HTTP ${res.status}`, cause: err }),
+  })
+  if (data instanceof Error) return data
+  if (!res.ok || !data.access_token || !data.expires_in) {
+    return new GoogleTokenError({
+      oauthError: data.error ?? `http_${res.status}`,
+      description: data.error_description ?? data.message ?? `HTTP ${res.status}`,
+    })
+  }
+  // Omit absent fields: a refresh response has no refresh_token, and merging an
+  // undefined one over the stored tokens would drop it.
+  return {
+    access_token: data.access_token,
+    expiry_date: Date.now() + data.expires_in * 1000,
+    ...(data.refresh_token ? { refresh_token: data.refresh_token } : {}),
+    ...(data.scope ? { scope: data.scope } : {}),
+    ...(data.token_type ? { token_type: data.token_type } : {}),
+    ...(data.id_token ? { id_token: data.id_token } : {}),
+  }
+}
+
+export function exchangeZeleShGoogleCode({ apiUrl, code, codeVerifier, signal }: {
+  apiUrl: string
+  code: string
+  codeVerifier: string
+  signal: AbortSignal
+}) {
+  return zeleShGoogleToken({ apiUrl, path: '/api/v1/oauth/google/token', body: { code, codeVerifier }, signal })
+}
+
+export function refreshZeleShGoogleToken({ apiUrl, refreshToken, signal }: {
+  apiUrl: string
+  refreshToken: string
+  signal: AbortSignal
+}) {
+  return zeleShGoogleToken({ apiUrl, path: '/api/v1/oauth/google/refresh', body: { refreshToken }, signal })
 }
