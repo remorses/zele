@@ -143,6 +143,7 @@ zele mail list --folder sent --limit 100          # list sent mail
 zele mail list --filter "is:unread" --limit 100 | yq '.[].id' | xargs zele mail read  # read all unread
 zele mail search "from:github" --limit 100        # search with Gmail query syntax
 zele mail read <thread-id>                        # read a thread
+zele mail read 'https://mail.google.com/mail/u/0/#inbox/FMfcgz…'  # read a thread from a Gmail link
 zele mail send                                    # send an email
 zele mail send --thread-id <thread-id>            # send into an existing thread
 zele mail reply <thread-id>                       # reply to a thread (must mail read first)
@@ -155,6 +156,8 @@ zele mail watch                                   # wait for the next new email
 zele mail watch --filter "is:unread from:alice"   # wait for a specific email
 zele mail watch --timeout 300                     # wait up to 5 minutes
 ```
+
+Every command that takes a thread ID also takes the link from Gmail's address bar, and the draft commands take an open draft's link. Pass `--account` for the mailbox the link came from.
 
 `mail list` defaults to **Inbox**. Use `--folder sent` for mail you sent. `is:unread` on `mail list` only matches unread Inbox threads. `mail search` looks in Inbox and Sent on IMAP, and Gmail all-mail on Google accounts.
 
