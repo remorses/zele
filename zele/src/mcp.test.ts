@@ -22,6 +22,9 @@ function textOf(result: Awaited<ReturnType<Client['callTool']>>): string {
 test('zele mcp lists commands as tools and runs them', { timeout: TEST_TIMEOUT_MS }, async () => {
   const transport = new StdioClientTransport({ command: 'bun', args: [CLI_PATH, 'mcp'], stderr: 'pipe' })
   const client = new Client({ name: 'zele-mcp-e2e', version: '0.0.0' })
+  // any non-JSON-RPC line on the server's stdout shows up here as a parse error
+  const protocolErrors: string[] = []
+  client.onerror = (error) => protocolErrors.push(error.message)
   await client.connect(transport)
 
   try {
@@ -50,6 +53,8 @@ test('zele mcp lists commands as tools and runs them', { timeout: TEST_TIMEOUT_M
     const whoami = await client.callTool({ name: 'whoami', arguments: {} })
     expect(whoami.isError).toBeFalsy()
     expect(textOf(whoami)).toContain(ACCOUNT)
+
+    expect(protocolErrors).toEqual([])
   } finally {
     await client.close()
   }
