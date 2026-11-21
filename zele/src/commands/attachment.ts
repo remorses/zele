@@ -6,7 +6,7 @@ import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
 import fs from 'node:fs'
 import path from 'node:path'
-import { getClient } from '../auth.js'
+import { getClient, getClientForThread } from '../auth.js'
 import { parseThreadIdArg } from '../gmail-link.js'
 import { createOutput, type Output } from '../output.js'
 
@@ -22,7 +22,9 @@ export function registerAttachmentCommands(cli: ZeleCli) {
       const threadId = parseThreadIdArg(threadIdArg)
       if (threadId instanceof Error) out.fail(threadId)
 
-      const { client } = await getClient(options.account)
+      const entry = await getClientForThread(options.account, threadId)
+      if (entry instanceof Error) out.fail(entry)
+      const { client } = entry
 
       const threadResult = await client.getThread({ threadId })
       if (threadResult instanceof Error) out.fail(threadResult)

@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import React from 'react'
 import { lookup as mimeLookup } from 'mrmime'
-import { getClients, getClient, listAccounts, login } from '../auth.js'
+import { getClients, getClient, getClientForThread, getClientsForThreads, listAccounts, login } from '../auth.js'
 import { replySubject, threadAnchor } from '../email-utils.js'
 import type { ThreadListResult } from '../gmail-client.js'
 import type { GmailClient } from '../gmail-client.js'
@@ -357,18 +357,21 @@ export function registerMailCommands(cli: ZeleCli) {
       const threadIds = parseThreadIdArgs(threadIdArgs)
       if (threadIds instanceof Error) out.fail(threadIds)
 
-      const { client, email, appId, accountType } = await getClient(options.account)
-
       if (options.raw && options.rawHtml) {
         out.error('--raw and --raw-html cannot be used together')
         out.exit(1)
       }
+      if (options.raw && threadIds.length > 1) {
+        out.error('--raw only supports a single thread ID')
+        out.exit(1)
+      }
+
+      const entries = await getClientsForThreads(options.account, threadIds)
 
       if (options.raw) {
-        if (threadIds.length > 1) {
-          out.error('--raw only supports a single thread ID')
-          out.exit(1)
-        }
+        const entry = entries[0]!
+        if (entry instanceof Error) out.fail(entry)
+        const { client, email, appId } = entry
         const threadResult = await client.getThread({ threadId: threadIds[0]!, skipCache: true, headersOnly: true })
         if (threadResult instanceof Error) out.fail(threadResult)
         const thread = threadResult.parsed
@@ -387,7 +390,13 @@ export function registerMailCommands(cli: ZeleCli) {
       // can still reject. Keep each read isolated so one failure cannot abort
       // a multi-thread command.
       const settled = await Promise.allSettled(
-        threadIds.map((id) => client.getThread({ threadId: id, skipCache: true })),
+        threadIds.map(async (id, i) => {
+          const entry = entries[i]!
+          if (entry instanceof Error) return entry
+          const thread = await entry.client.getThread({ threadId: id, skipCache: true })
+          if (thread instanceof Error) return thread
+          return { ...thread, email: entry.email, appId: entry.appId, accountType: entry.accountType }
+        }),
       )
 
       const w = Math.min(process.stdout.columns || 72, 72)
@@ -417,6 +426,7 @@ export function registerMailCommands(cli: ZeleCli) {
           continue
         }
 
+        const { email, appId, accountType } = result.value
         const thread = result.value.parsed
 
         if (thread.messages.length === 0) {
@@ -510,6 +520,9 @@ export function registerMailCommands(cli: ZeleCli) {
 
         await markThreadSeen(out, { email, appId, threadId: thread.id, messages: thread.messages })
       }
+
+      const failed = settled.filter((r) => r.status === 'rejected' || r.value instanceof Error).length
+      if (failed === settled.length) out.exit(1)
     })
 
   // =========================================================================
@@ -559,7 +572,9 @@ export function registerMailCommands(cli: ZeleCli) {
       const cc = parseEmailList(options.cc)
       const bcc = parseEmailList(options.bcc)
 
-      const { client, email, appId, accountType } = await getClient(options.account)
+      const entry = threadId ? await getClientForThread(options.account, threadId) : await getClient(options.account)
+      if (entry instanceof Error) out.fail(entry)
+      const { client, email, appId, accountType } = entry
 
       // --thread-id sends into an existing conversation: recipients default to
       // the thread's counterparty and the In-Reply-To/References headers (plus
@@ -664,7 +679,9 @@ export function registerMailCommands(cli: ZeleCli) {
 
       // --dry-run answers "who would this reply go to?" before committing to send.
       if (options.dryRun) {
-        const { client } = await getClient(options.account)
+        const entry = await getClientForThread(options.account, threadId)
+        if (entry instanceof Error) out.fail(entry)
+        const { client } = entry
         const envelope = await client.resolveThreadReply({
           threadId,
           to: parseEmailList(options.to),
@@ -698,7 +715,9 @@ export function registerMailCommands(cli: ZeleCli) {
 
       const attachments = resolveAttachments(out, options.attach)
 
-      const { client, email: accountEmail, appId, accountType } = await getClient(options.account)
+      const entry = await getClientForThread(options.account, threadId)
+      if (entry instanceof Error) out.fail(entry)
+      const { client, email: accountEmail, appId, accountType } = entry
 
       const to = parseEmailList(options.to)
       const cc = parseEmailList(options.cc)
@@ -808,7 +827,9 @@ export function registerMailCommands(cli: ZeleCli) {
         .map((e) => ({ email: e.trim() }))
         .filter((e) => e.email)
 
-      const { client } = await getClient(options.account)
+      const entry = await getClientForThread(options.account, threadId)
+      if (entry instanceof Error) out.fail(entry)
+      const { client } = entry
 
       if (options.draft) {
         const result = await client.createDraftForward({

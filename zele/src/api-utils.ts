@@ -90,6 +90,12 @@ export class AuthError extends errore.createTaggedError({
   message: 'Authentication failed for $email: $reason',
 }) {}
 
+/** Google token endpoint error relayed by zele.sh (code exchange or refresh). `oauthError` is Google's `error`, e.g. invalid_grant. */
+export class GoogleTokenError extends errore.createTaggedError({
+  name: 'GoogleTokenError',
+  message: 'Google token request failed ($oauthError): $description',
+}) {}
+
 /** Returned before a Gmail call when the stored token does not grant a scope the call needs. */
 export class MissingScopeError extends errore.createTaggedError({
   name: 'MissingScopeError',
@@ -165,6 +171,18 @@ export class AmbiguousRecipientError extends errore.createTaggedError({
   message: 'Cannot infer a reply recipient for thread $threadId: no replyable external recipient was found. Pass --to <email>.',
 }) {}
 
+/** Returned when a command needs one account and the thread ID can't identify it. */
+export class AccountRequiredError extends errore.createTaggedError({
+  name: 'AccountRequiredError',
+  message: 'Multiple accounts matched. Specify --account: $accounts',
+}) {}
+
+/** Returned when a thread ID matches a thread in more than one account. */
+export class ThreadInManyAccountsError extends errore.createTaggedError({
+  name: 'ThreadInManyAccountsError',
+  message: 'Thread $threadId exists in several accounts ($accounts). Specify --account',
+}) {}
+
 /** Returned when mail reply/send-in-thread runs against a thread whose latest
  *  non-draft message was not shown by `mail read`. Prevents agents from
  *  answering a stale view after a new reply arrives. */
@@ -224,6 +242,12 @@ export function isRateLimitError(err: any): boolean {
   if (status === 429) return true
   if (status === 403) return googleErrorReasons(err).some((r) => RATE_LIMIT_REASONS.includes(r))
   return false
+}
+
+/** The API answered 404, so the resource isn't in this account. */
+export function isNotFoundError(err: any): boolean {
+  if (err instanceof ApiError) return isNotFoundError(err.cause)
+  return (err?.code ?? err?.status ?? err?.response?.status) === 404
 }
 
 /** Google server error. The request may have been applied, so only idempotent calls should retry it. */

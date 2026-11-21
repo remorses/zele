@@ -1,5 +1,6 @@
 // zele.sh worker: docs site (holocron), better-auth at /api/auth, the inbox
-// API at /api/v1, and the Email Routing handler for *@zele.sh.
+// API at /api/v1, the Google login relay (oauth-handoff.ts), and the Email
+// Routing handler for *@zele.sh.
 
 import './globals.css'
 
@@ -8,8 +9,10 @@ import { app as holocronApp } from '@holocron.so/vite/app'
 import { getAuth } from './db.ts'
 import { apiApp } from './api.ts'
 import { receiveMail } from './receive-mail.ts'
+import { oauthHandoffApp } from './oauth-handoff.ts'
 
 export { InboxStore } from './inbox-store.ts'
+export { OAuthHandoff } from './oauth-handoff.ts'
 
 export const app = new Spiceflow()
   .use(({ request }, next) => {
@@ -26,6 +29,7 @@ export const app = new Spiceflow()
     return next()
   })
   .use(apiApp)
+  .use(oauthHandoffApp)
   .use(holocronApp)
 
 export default {

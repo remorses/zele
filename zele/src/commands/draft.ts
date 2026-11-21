@@ -6,7 +6,7 @@
 import type { ZeleCli } from '../cli-types.js'
 import { z } from 'zod'
 import * as clack from '@clack/prompts'
-import { getClients, getClient } from '../auth.js'
+import { getClients, getClient, getClientForThread } from '../auth.js'
 import type { GmailClient } from '../gmail-client.js'
 import type { ImapSmtpClient } from '../imap-smtp-client.js'
 import { AuthError } from '../api-utils.js'
@@ -169,7 +169,8 @@ export function registerDraftCommands(cli: ZeleCli) {
       const threadId = options.thread ? parseThreadIdArg(options.thread) : undefined
       if (threadId instanceof Error) out.fail(threadId)
 
-      const account = await getClient(options.account)
+      const account = threadId ? await getClientForThread(options.account, threadId) : await getClient(options.account)
+      if (account instanceof Error) out.fail(account)
       const { client } = account
 
       const result = await client.createDraft({

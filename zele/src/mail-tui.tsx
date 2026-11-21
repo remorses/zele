@@ -249,6 +249,7 @@ function AddAccount({
   const { pop } = useNavigation()
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [didAutoStart, setDidAutoStart] = useState(false)
+  const [confirmCode, setConfirmCode] = useState<string | undefined>()
 
   const handleLogin = async () => {
     if (isLoggingIn) return
@@ -258,6 +259,7 @@ function AddAccount({
       openBrowser: true,
       allowManualCodeEntry: false,
       showInstructions: false,
+      onAuthorizationUrl: (_url, code) => setConfirmCode(code),
     })
     setIsLoggingIn(false)
 
@@ -287,7 +289,8 @@ function AddAccount({
         `# Add Account\n\n` +
         `The browser opens automatically for Google sign-in.\n\n` +
         `Complete login in the browser, then come back here. ` +
-        `This screen waits for the browser login and will finish automatically.`
+        `This screen waits for the browser login and will finish automatically.` +
+        (confirmCode ? `\n\nCheck that the browser shows code **${confirmCode}** before you continue to Google.` : '')
       }
       actions={
         <ActionPanel>
