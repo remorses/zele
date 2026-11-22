@@ -20,9 +20,11 @@
 
    Criteria: `--from`, `--to`, `--subject`, `--query`. Actions: `--add-label` (one label, created if missing), `--remove-label` (repeatable, must exist), `--archive`, `--mark-read`, `--star`. Gmail accepts filter changes only with the `gmail.settings.basic` scope, which the default Google login cannot grant yet. zele checks the token's scopes first, so the command fails before it creates any label, with a link to the Gmail filter settings.
 
-3. **Gmail web links work as IDs** — commands that take a thread ID also take a Gmail link like `https://mail.google.com/mail/u/0/#inbox/FMfcgz…`, and draft commands take a compose link (`…#drafts?compose=…`). Links are decoded offline, with no API call.
+3. **Gmail web links work as IDs** — commands that take a thread ID also take a Gmail link like `https://mail.google.com/mail/u/0/#inbox/FMfcgz…`, and draft commands take a compose link (`…#drafts?compose=…`). Links are decoded offline, with no API call. The other way works too: on Google accounts, `mail read` prints a Gmail link for each thread, and `draft list`, `draft get`, `draft create` and `draft update` print a link that opens the draft in Gmail's compose window.
 
-4. **Safer browser login for Google and Microsoft**:
+4. **No more `--account` for Gmail thread IDs** — with several accounts signed in, commands that take a Gmail thread ID find the Google account that has the thread. IMAP IDs repeat between mailboxes, so they still need `--account`.
+
+5. **Safer browser login for Google and Microsoft**:
    - Every login sends PKCE and a random state, and checks the state when the code comes back.
    - The default Google clients (Thunderbird, GNOME, KDE) and Microsoft redirect to a server on `127.0.0.1` on a random port instead of `localhost:8089`, so login no longer kills whatever process used port 8089. When the browser runs on another machine, paste the **full redirect URL** from the address bar. A bare code is no longer accepted.
    - zele's own Google client (`ZELE_GOOGLE_CLIENT=zele`) logs in through zele.sh, which is its OAuth web client. zele opens a zele.sh page that shows a short code (also printed in the terminal), then Google redirects back to zele.sh and the CLI polls for the one-time code. It works the same on a laptop, over SSH or in an agent, with nothing to paste. zele.sh keeps the code for at most 10 minutes and adds the client secret when the CLI exchanges the code or refreshes the access token, so the secret is not in the npm package. Tokens pass through zele.sh in transit and are not stored or logged. Gmail and Calendar requests still go directly from your computer to Google, and no mail or calendar content reaches zele.sh.
@@ -31,13 +33,17 @@
 
    The `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET` overrides are removed. Accounts saved with a custom client must run `zele login` again, or be removed with `zele logout <email>`.
 
-5. **Gmail commands use fewer API quota units**, with the same output. `mail list` and `mail search` reuse cached threads while their history ID is unchanged, changed threads fetch only labels and new messages, and label changes (`star`, `archive`, `label`, read marks) cost 10 units per thread instead of about 90.
+6. **Gmail commands use fewer API quota units**, with the same output. `mail list` and `mail search` reuse cached threads while their history ID is unchanged, changed threads fetch only labels and new messages, and label changes (`star`, `archive`, `label`, read marks) cost 10 units per thread instead of about 90.
 
-6. **Faster calendar event commands** — `cal get`, `cal update`, `cal delete` and `cal respond` fetch only the requested event instead of the whole calendar, and `cal list` gets all events in one CalDAV request. A missing event fails with `event "..." not found`. Failed event writes are now reported as errors instead of successes.
+7. **Faster calendar event commands** — `cal get`, `cal update`, `cal delete` and `cal respond` fetch only the requested event instead of the whole calendar, and `cal list` gets all events in one CalDAV request. A missing event fails with `event "..." not found`. Failed event writes are now reported as errors instead of successes.
 
-7. **Fixed `cal respond` on Google Calendar** — the reply keeps the invitation's organizer, so Google now applies it. Before, zele reported success but the invite stayed unanswered.
+8. **Fixed `cal respond` on Google Calendar** — the reply keeps the invitation's organizer, so Google now applies it. Before, zele reported success but the invite stayed unanswered.
 
-8. **Gmail sends are never retried after an ambiguous error** — a 403 `backendError` could make `mail send`, `mail reply` or `draft send` send a duplicate. Sends now retry only real rate limit errors, and the worst-case retry wait dropped from hours to 30 seconds.
+9. **Gmail sends are never retried after an ambiguous error** — a 403 `backendError` could make `mail send`, `mail reply` or `draft send` send a duplicate. Sends now retry only real rate limit errors, and the worst-case retry wait dropped from hours to 30 seconds.
+
+10. **One expired Google account no longer breaks other accounts** — if a Google token cannot be refreshed, commands that use other accounts keep working. Only that account fails, with a login error.
+
+11. **`mail read` exits with code 1** when no thread could be read.
 
 ## 0.11.0
 
