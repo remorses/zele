@@ -761,7 +761,14 @@ async function authenticateAccount(account: AccountId): Promise<OAuth2Client> {
   // often omits from refresh responses
   if (tokens.expiry_date && tokens.expiry_date < Date.now()) {
     printStderr(pc.dim(`Token expired for ${account.email}, refreshing...`))
-    const { credentials } = await oauth2Client.refreshAccessToken()
+    const refreshed = await errore.tryAsync(() => oauth2Client.refreshAccessToken())
+    // Keep the expired tokens: this account's API calls then fail with a typed
+    // AuthError, instead of one bad account crashing commands for every account.
+    if (refreshed instanceof Error) {
+      printStderr(pc.dim(`Token refresh failed for ${account.email}: ${refreshed.message}`))
+      return oauth2Client
+    }
+    const { credentials } = refreshed
     const merged = { ...tokens, ...credentials }
     oauth2Client.setCredentials(merged)
     saveTokens(merged)
