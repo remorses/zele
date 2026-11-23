@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.1
+
+1. **`ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET` work again** — log in to Google with an OAuth client from your own Google Cloud project:
+
+   ```bash
+   export ZELE_CLIENT_ID=123.apps.googleusercontent.com
+   export ZELE_CLIENT_SECRET=your-client-secret
+   zele login
+   ```
+
+   These logins redirect to `http://localhost:8089`, like before 0.12. Desktop app clients need no setup; Web application clients need `http://localhost:8089` as a redirect URI. Accounts saved with a custom client refresh again when both variables are set.
+
 ## 0.12.0
 
 1. **New `zele mcp` command** — starts an MCP server over stdio. Every zele command is a tool with the same options (`mail list` is `mail_list`, `cal events` is `cal_events`), plus an `account` argument like `--account`. The tool result is the text the CLI prints (YAML for structured output):
