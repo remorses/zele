@@ -71,6 +71,7 @@ zele mail read <thread_id> --account me@example.com
    ```
 5. **Google-only features** (labels, Gmail filters, `zele cal *`, full profile) fail on IMAP accounts with a clear error. Check `zele whoami` output for account type before using them.
 6. **Headless Google login** requires a tmux wrapper because `zele login` is interactive. See the README "Remote / headless login" section for the exact pattern.
+    - To log in with the user's own Google OAuth client, set `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET` before `zele login`, and keep them set for every later zele command. Web application clients need `http://localhost:8089` as a redirect URI. Never print the secret.
 7. **Wait for expected emails with `zele mail watch`**, not `sleep`. For replies, follow the reply follow-up section above. For verification codes, check they did not already arrive, then: `zele mail watch --filter 'subject:verification' --timeout 300`.
 8. **Check reply recipients before sending** with `zele mail reply <thread-id> --dry-run`. Recipients are inferred from the thread, not from the sender of the last message, so a thread whose last message you sent still replies to the other person. If a reply would only reach the account's own address, zele refuses to send:
    ```bash

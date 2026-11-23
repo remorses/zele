@@ -46,6 +46,21 @@ zele login
 
 Opens a browser for Google OAuth2. Repeat to add more accounts.
 
+#### Use your own Google OAuth client
+
+Set `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET` to log in with a client from your own Google Cloud project:
+
+```bash
+export ZELE_CLIENT_ID=123.apps.googleusercontent.com
+export ZELE_CLIENT_SECRET=your-client-secret
+zele login
+```
+
+- **Desktop app** clients work with no extra setup.
+- **Web application** clients need `http://localhost:8089` as an authorized redirect URI.
+- Enable the Gmail API and the CalDAV API in the project.
+- Keep both variables set when you run zele. Token refresh uses the same client.
+
 #### Remote / headless login (for agents)
 
 In an agent or non-TTY shell, `zele login --method google` and `zele login microsoft` start a background daemon and return immediately. Open the printed URL, approve access, then poll:
@@ -154,6 +169,7 @@ Things to know:
 - **The file is a password.** IMAP passwords and OAuth refresh tokens are stored unencrypted. Send it over `scp`/`ssh`, never through chat, email or a synced folder. zele sets `~/.zele` to `700` and the files to `600` on every start.
 - **Both machines keep working.** Each copy refreshes its own access tokens. Google and Microsoft refresh tokens stay valid after use, so one machine does not log out the other.
 - **The copies do not sync.** A `login`, `logout` or `inbox create` changes only that machine. Read marks are per machine too: `mail reply` needs a `mail read` of the thread on the same machine.
+- **Custom OAuth clients.** If you logged in with `ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET`, set the same variables on the other machine.
 - **Revoking access** (Google account security page, Microsoft account apps, changing the IMAP password) logs out every copy.
 
 To start clean instead, use the [headless login](#remote--headless-login-for-agents) on the other machine.

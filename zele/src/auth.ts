@@ -44,6 +44,7 @@ import {
   waitForOAuthCode,
   waitForZeleShOAuthCode,
   type BrowserAuthOptions,
+  type LoopbackRedirect,
 } from './oauth-callback-server.js'
 import {
   buildMicrosoftAuthUrl,
@@ -126,10 +127,11 @@ export function hasCapability(capabilities: string | AccountCapability[], cap: A
 //
 // Pick one with ZELE_GOOGLE_CLIENT=<name>. Default is thunderbird until Google
 // approves the zele client's restricted scopes (docs/google-oauth-verification.md).
+// Or bring your own client with ZELE_CLIENT_ID and ZELE_CLIENT_SECRET (customGoogleClient).
 // ---------------------------------------------------------------------------
 
 type GoogleOAuthClient =
-  | { redirect: 'loopback'; clientId: string; clientSecret: string; scopes: string[] }
+  | { redirect: 'loopback'; clientId: string; clientSecret: string; scopes: string[]; callback?: LoopbackRedirect }
   | { redirect: 'zele.sh'; clientId: string }
 
 /** Scopes the third-party clients can grant. They cannot grant gmail.settings.basic. */
@@ -176,8 +178,27 @@ const DEFAULT_GOOGLE_CLIENT = 'thunderbird'
 /** zele.sh token exchange and refresh give up after this. */
 const TOKEN_REQUEST_TIMEOUT_MS = 30_000
 
-/** Client used for new logins: ZELE_GOOGLE_CLIENT, else thunderbird. */
+/**
+ * Redirect for ZELE_CLIENT_ID clients, the one zele used before 0.12. Desktop clients accept
+ * it (any localhost port), and Web clients registered for older zele keep working.
+ */
+const CUSTOM_CLIENT_REDIRECT: LoopbackRedirect = { host: 'localhost', port: 8089 }
+
+/** The user's own Google client from ZELE_CLIENT_ID and ZELE_CLIENT_SECRET, or null when unset. */
+function customGoogleClient(): GoogleOAuthClient | Error | null {
+  const clientId = process.env.ZELE_CLIENT_ID
+  const clientSecret = process.env.ZELE_CLIENT_SECRET
+  if (!clientId && !clientSecret) return null
+  if (!clientId || !clientSecret) return new Error('Set both ZELE_CLIENT_ID and ZELE_CLIENT_SECRET, or neither')
+  return { redirect: 'loopback', clientId, clientSecret, scopes: THIRD_PARTY_CLIENT_SCOPES, callback: CUSTOM_CLIENT_REDIRECT }
+}
+
+/** Client used for new logins: ZELE_CLIENT_ID, else ZELE_GOOGLE_CLIENT, else thunderbird. */
 function selectGoogleClient(): GoogleOAuthClient | Error {
+  const custom = customGoogleClient()
+  if (custom instanceof Error) return custom
+  if (custom && process.env.ZELE_GOOGLE_CLIENT) return new Error('Set ZELE_CLIENT_ID or ZELE_GOOGLE_CLIENT, not both')
+  if (custom) return custom
   const name = process.env.ZELE_GOOGLE_CLIENT || DEFAULT_GOOGLE_CLIENT
   if (!Object.hasOwn(OAUTH_CLIENTS, name)) {
     return new Error(`Unknown ZELE_GOOGLE_CLIENT "${name}". Use one of: ${Object.keys(OAUTH_CLIENTS).join(', ')}`)
@@ -196,7 +217,11 @@ function googleRelayUrl(): string {
 
 /** Client a stored account logged in with. The account's appId is the client id. */
 function googleClientForAppId(appId: string): GoogleOAuthClient | undefined {
-  return Object.values(OAUTH_CLIENTS).find((c) => c.clientId === appId)
+  const builtIn = Object.values(OAUTH_CLIENTS).find((c) => c.clientId === appId)
+  if (builtIn) return builtIn
+  const custom = customGoogleClient()
+  if (custom && !(custom instanceof Error) && custom.clientId === appId) return custom
+  return undefined
 }
 
 /**
@@ -371,6 +396,7 @@ async function googleTokensViaLoopback({ client, pkce, options }: {
         code_challenge: pkce.challenge,
         code_challenge_method: CodeChallengeMethod.S256,
       }),
+    redirect: client.callback,
     loginCommand: 'zele login',
     provider: 'Google',
     openBrowser: options?.openBrowser,
@@ -738,10 +764,9 @@ async function authenticateAccount(account: AccountId): Promise<OAuth2Client> {
 
   const googleClient = googleClientForAppId(account.appId)
   if (!googleClient) {
-    // Saved by an older zele with ZELE_CLIENT_ID. Logging in again replaces the row; logout removes it.
     throw new AuthError({
       email: account.email,
-      reason: `it was saved with a custom Google OAuth client (${account.appId}) that zele no longer supports. Run: zele login (replaces it) or zele logout ${account.email}`,
+      reason: `it was saved with the custom Google OAuth client ${account.appId}. Set ZELE_CLIENT_ID to it and ZELE_CLIENT_SECRET to its secret, or run: zele login (replaces it)`,
     })
   }
   const tokens: GoogleTokens = JSON.parse(row.tokens)

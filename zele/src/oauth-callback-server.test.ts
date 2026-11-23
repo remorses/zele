@@ -83,6 +83,32 @@ test('loopback server ignores redirects with another state and returns the match
   expect(await pending).toEqual({ code: 'real-code', redirectUri: params.redirectUri })
 })
 
+test('a fixed localhost redirect (custom ZELE_CLIENT_ID clients) receives the code', async () => {
+  const probe = http.createServer().listen(0, '127.0.0.1')
+  await new Promise((resolve) => probe.once('listening', resolve))
+  const port = (probe.address() as AddressInfo).port
+  await new Promise((resolve) => probe.close(resolve))
+
+  const listening = Promise.withResolvers<{ redirectUri: string; state: string }>()
+  const pending = waitForOAuthCode({
+    buildAuthUrl: (params) => {
+      listening.resolve(params)
+      return 'https://accounts.example/auth'
+    },
+    redirect: { host: 'localhost', port },
+    loginCommand: 'zele login',
+    provider: 'Google',
+    openBrowser: false,
+    allowManualCodeEntry: false,
+    showInstructions: false,
+  })
+  const params = await listening.promise
+  expect(params.redirectUri).toBe(`http://localhost:${port}`)
+  const res = await fetch(`${params.redirectUri}/?code=custom-code&state=${params.state}`)
+  expect(res.status).toBe(200)
+  expect(await pending).toEqual({ code: 'custom-code', redirectUri: `http://localhost:${port}` })
+})
+
 test('a throwing authorization URL callback returns an error and closes the server', async () => {
   let redirectUri = ''
   const result = await waitForOAuthCode({

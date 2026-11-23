@@ -33,8 +33,17 @@ const MAX_RELAY_POLL_FAILURES = 5
 const HTTP_SERVER_ERROR = 500
 const HTTP_TOO_MANY_REQUESTS = 429
 
-/** Google and Microsoft desktop clients accept any port on this loopback address. */
+/** The callback server only listens here, never on other interfaces. */
 const LOOPBACK_HOST = '127.0.0.1'
+
+/** Host and port in the redirect URI. Port 0 picks a random free port. */
+export interface LoopbackRedirect {
+  host: '127.0.0.1' | 'localhost'
+  port: number
+}
+
+/** RFC 8252 default. Google Desktop clients and Microsoft's Thunderbird client accept any port here. */
+export const RANDOM_LOOPBACK_REDIRECT: LoopbackRedirect = { host: LOOPBACK_HOST, port: 0 }
 
 export interface BrowserAuthOptions {
   openBrowser?: boolean
@@ -244,6 +253,8 @@ function authCallbackHtml(options: {
 export async function waitForOAuthCode(opts: {
   /** Builds the authorize URL. Must send `state` and redirect to `redirectUri`. */
   buildAuthUrl: (params: { redirectUri: string; state: string }) => string
+  /** Defaults to RANDOM_LOOPBACK_REDIRECT. A fixed port is for clients with one registered redirect URI. */
+  redirect?: LoopbackRedirect
   loginCommand: string
   provider: string
   openBrowser?: boolean
@@ -253,12 +264,14 @@ export async function waitForOAuthCode(opts: {
 }): Promise<{ code: string; redirectUri: string } | Error> {
   const allowManualCodeEntry = opts.allowManualCodeEntry ?? true
   const showInstructions = opts.showInstructions ?? true
+  const redirect = opts.redirect ?? RANDOM_LOOPBACK_REDIRECT
   const state = randomBytes(32).toString('base64url')
 
+  // Browsers try 127.0.0.1 when localhost on ::1 refuses, so a localhost redirect still reaches this server.
   const server = http.createServer()
   const listenError = await new Promise<Error | null>((resolve) => {
-    server.once('error', (err) => resolve(new Error(`Failed to start local auth callback server on ${LOOPBACK_HOST}`, { cause: err })))
-    server.listen(0, LOOPBACK_HOST, () => resolve(null))
+    server.once('error', (err) => resolve(new Error(`Failed to start local auth callback server on ${LOOPBACK_HOST}:${redirect.port}`, { cause: err })))
+    server.listen(redirect.port, LOOPBACK_HOST, () => resolve(null))
   })
   if (listenError) return listenError
   const address = server.address()
@@ -266,7 +279,7 @@ export async function waitForOAuthCode(opts: {
     server.close()
     return new Error('Local auth callback server has no TCP port')
   }
-  const redirectUri = `http://${LOOPBACK_HOST}:${address.port}`
+  const redirectUri = `http://${redirect.host}:${address.port}`
   // buildAuthUrl calls the provider SDK and onAuthorizationUrl publishes the URL; a throw must not leak the server.
   const authUrl = errore.tryFn({
     try: () => {
