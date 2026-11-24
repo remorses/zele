@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.0
+
+1. **zele's own Google client uses narrower calendar scopes** — `ZELE_GOOGLE_CLIENT=zele` now asks for `calendar.events` and `calendar.calendarlist.readonly` instead of full `calendar`, and `zele cal` talks to the Google Calendar REST API for these accounts. That also brings real Google Meet links, reminders, colors and recurrence on new events, expanded recurring events in `cal events`, and a Google Calendar link in event output:
+
+   ```bash
+   zele cal create --summary "Standup" --from 2026-12-01T10:00 --to +30m --meet --reminder popup:10m
+   ```
+
+   Accounts on the default Thunderbird client keep using CalDAV, so nothing changes for them. If you already logged in with the zele client, log in again to switch:
+
+   ```bash
+   ZELE_GOOGLE_CLIENT=zele zele login --method google
+   ```
+
 ## 0.12.1
 
 1. **`ZELE_CLIENT_ID` and `ZELE_CLIENT_SECRET` work again** — log in to Google with an OAuth client from your own Google Cloud project:
