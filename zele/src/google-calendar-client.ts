@@ -24,10 +24,12 @@ import type {
 
 const HTTP_NOT_FOUND = 404
 const HTTP_GONE = 410
+const HTTP_PRECONDITION_FAILED = 412
 const DEFAULT_MAX_RESULTS = 20
 const PRIMARY = 'primary'
 
-/** Wrap a googleapis call: auth failures become AuthError, 404 and 410 NotFoundError, the rest ApiError. */
+/** Wrap a googleapis call: auth failures become AuthError, 404 and 410 NotFoundError, the rest ApiError.
+ *  412 means an If-Match etag no longer matches: the event changed after zele read it. */
 function calendarBoundary<T>({ email, resource, fn }: { email: string; resource: string; fn: () => Promise<T> }) {
   return errore.tryAsync({
     try: fn,
@@ -36,6 +38,9 @@ function calendarBoundary<T>({ email, resource, fn }: { email: string; resource:
       if (err instanceof AuthError) return err
       const status = (err as { code?: unknown; status?: unknown })?.code ?? (err as { status?: unknown })?.status
       if (status === HTTP_NOT_FOUND || status === HTTP_GONE) return new NotFoundError({ resource })
+      if (status === HTTP_PRECONDITION_FAILED) {
+        return new ApiError({ reason: `${resource} changed while zele was updating it. Run the command again.`, cause: err })
+      }
       if (isAuthLikeError(err)) return new AuthError({ email, reason: String(err) })
       return new ApiError({ reason: String(err), cause: err })
     },
@@ -267,13 +272,17 @@ export class GoogleCalendarApiClient implements CalendarClient {
       resource: `event "${eventId}"`,
       fn: () =>
         withRetry(() =>
-          this.api.events.patch({
-            calendarId,
-            eventId,
-            requestBody,
-            conferenceDataVersion: withMeet ? 1 : 0,
-            sendUpdates: attendeesChanged || existing.attendees?.length ? 'all' : 'none',
-          }),
+          this.api.events.patch(
+            {
+              calendarId,
+              eventId,
+              requestBody,
+              conferenceDataVersion: withMeet ? 1 : 0,
+              sendUpdates: attendeesChanged || existing.attendees?.length ? 'all' : 'none',
+            },
+            // The attendee list replaces the stored one, so refuse it if the event changed since we read it
+            attendeesChanged && existing.etag ? { headers: { 'If-Match': existing.etag } } : undefined,
+          ),
         ),
     })
     if (res instanceof Error) return res
@@ -295,8 +304,8 @@ export class GoogleCalendarApiClient implements CalendarClient {
     if (existing instanceof Error) return existing
 
     const isSelf = (a: calendar_v3.Schema$EventAttendee) => a.self || a.email?.toLowerCase() === this.email.toLowerCase()
-    const attendees = existing.attendees ?? []
-    if (!attendees.some(isSelf)) {
+    const self = existing.attendees?.find(isSelf)
+    if (!self?.email) {
       return new MissingDataError({ what: 'invitation for this account', resource: `event ${eventId}` })
     }
 
@@ -308,8 +317,10 @@ export class GoogleCalendarApiClient implements CalendarClient {
           this.api.events.patch({
             calendarId,
             eventId,
+            // Only our own entry: attendeesOmitted keeps the other guests as Google stores them
             requestBody: {
-              attendees: attendees.map((a) => (isSelf(a) ? { ...a, responseStatus: status, comment: comment ?? a.comment } : a)),
+              attendeesOmitted: true,
+              attendees: [{ email: self.email, responseStatus: status, comment: comment ?? self.comment }],
             },
           }),
         ),
