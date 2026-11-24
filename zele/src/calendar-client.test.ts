@@ -1,4 +1,4 @@
-// CalendarClient against a local Google-shaped CalDAV server.
+// CalDavCalendarClient against a local Google-shaped CalDAV server.
 // Checks which requests event reads make: one GET for <encoded uid>.ics, then one
 // calendar-query with data as fallback. The server answers every calendar-multiget
 // with a 404 object, like the broken Google objects that made whole-calendar reads fail.
@@ -6,7 +6,7 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
-import { CalendarClient } from './calendar-client.js'
+import { CalDavCalendarClient } from './calendar-client.js'
 import { NotFoundError } from './api-utils.js'
 
 const EMAIL = 'me@example.com'
@@ -117,15 +117,15 @@ beforeEach(() => {
 })
 
 /** New client with calendar discovery already done, so `requests` starts empty. */
-async function readyClient(): Promise<CalendarClient> {
-  const client = new CalendarClient({ accessToken: 'token', email: EMAIL, appId: 'test', serverUrl })
+async function readyClient(): Promise<CalDavCalendarClient> {
+  const client = new CalDavCalendarClient({ accessToken: 'token', email: EMAIL, appId: 'test', serverUrl })
   const tz = await client.getTimezone()
   expect(tz).toBe('Europe/Rome')
   requests = []
   return client
 }
 
-describe('CalendarClient event reads', () => {
+describe('CalDavCalendarClient event reads', () => {
   test('createEvent saves at the encoded uid URL and getEvent reads it with one GET', async () => {
     const client = await readyClient()
     const created = await client.createEvent({ summary: 'Standup', start: '2026-11-20T09:00:00Z', end: '2026-11-20T09:30:00Z' })

@@ -47,6 +47,7 @@
   "dependencies": {
     "@clack/prompts": "^1.2.0",
     "@goke/mcp": "^0.2.0",
+    "@googleapis/calendar": "^20.2.0",
     "@googleapis/gmail": "^22.0.1",
     "@opentui/core": "^0.2.12",
     "@opentui/react": "^0.2.12",

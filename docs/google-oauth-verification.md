@@ -81,12 +81,15 @@ code + verifier + client secret + redirect_uri ──►  Google token endpoint
 | --- | --- | --- |
 | `gmail.modify` | restricted | Read, search and send mail, manage drafts and labels, archive, mark read, star, trash and untrash. zele never deletes mail permanently. |
 | `gmail.settings.basic` | restricted | `zele mail filter create/delete` manage Gmail filters. `filters.create` and `filters.delete` accept only this scope. |
-| `calendar` | sensitive | zele reads and writes events through Google's CalDAV API, which needs full calendar access. Used by `zele cal` list, create, update, delete and RSVP. |
+| `calendar.events` | sensitive | `zele cal events`, `get`, `create`, `update`, `delete`, `respond` and `freebusy` through the Calendar REST API (`GoogleCalendarApiClient`). |
+| `calendar.calendarlist.readonly` | non-sensitive | `zele cal list`, and the calendar time zone used to read `--from tomorrow 10:00`. |
 
 Not requested:
 
 - `https://mail.google.com/`: only needed for permanent delete or Gmail IMAP/SMTP. zele uses neither.
 - `userinfo.email`: login reads the address from `users.getProfile`, which `gmail.modify` covers.
+- `calendar`: only Google CalDAV needs it. The zele client uses the Calendar REST API instead. The third-party clients still grant `calendar`, so their accounts keep using CalDAV (`CalDavCalendarClient`); `createCalendarClient` in `auth.ts` picks by the granted scopes.
+- `calendar.events.owned` or `calendar.app.created`: they cannot answer invitations from other people (`events.patch` on an event the user does not own).
 
 ## Reasons for the review form
 
@@ -94,7 +97,9 @@ Not requested:
 
 **gmail.settings.basic.** The `zele mail filter` command lists, creates and deletes Gmail filters so users can sort incoming mail from the terminal. Gmail only allows `filters.create` and `filters.delete` with this scope. zele also lists send-as aliases so replies go out from the right address.
 
-**calendar.** `zele cal` lists the user's calendars and events, creates, edits and deletes events, and answers invitations. zele talks to Google Calendar over CalDAV, which requires full calendar access. A read-only scope cannot create events or send RSVPs.
+**calendar.events.** `zele cal` lists and reads events, creates, edits and deletes events (with attendees and Google Meet links), and answers invitations (accept, decline, maybe). `calendar.events.readonly` cannot write. `calendar.events.owned` and `calendar.app.created` cannot answer invitations from other people, because those events belong to the organizer. zele never changes, shares or deletes calendars, so it does not request `calendar`.
+
+**calendar.calendarlist.readonly.** `zele cal list` shows the calendars in the user's Google Calendar, and every time the user types, like `--from tomorrow 10:00`, is read in the calendar's time zone from `calendarList.get`. `calendar.events` cannot list calendars.
 
 **Data handling.** zele runs on the user's computer, and every Gmail and Calendar API call goes directly from there to Google. OAuth tokens and cached mail are stored only in `~/.zele/sqlite.db` on that machine. zele.sh is the OAuth web client: it redirects the user to Google, keeps the one-time authorization code for up to 10 minutes until the CLI collects it, and adds the client secret when the CLI exchanges the code (with its PKCE verifier) or refreshes the access token. Tokens pass through zele.sh in transit and are not stored or logged. No mail or calendar content reaches zele.sh. Privacy policy: https://zele.sh/privacy
 
@@ -112,6 +117,6 @@ Checked against the Gmail API reference (`Authorization scopes` section of each 
 | `settings.filters.list`, `settings.sendAs.list` | `gmail.modify` or `gmail.settings.basic` |
 | `settings.filters.create/delete` | `gmail.settings.basic` only |
 
-Google CalDAV (`apidata.googleusercontent.com/caldav/v2/`) needs the **CalDAV API** enabled in the project, besides the Calendar API.
+The zele client needs the **Google Calendar API** enabled in project zele-sh. Google CalDAV (`apidata.googleusercontent.com/caldav/v2/`, third-party clients only) needs the **CalDAV API** enabled in the calling project.
 
 A live read-only test with only these three scopes returned 200 for every Gmail read above and 207 for CalDAV `PROPFIND` and `REPORT` (2026-11-19).

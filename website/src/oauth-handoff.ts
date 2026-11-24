@@ -29,7 +29,8 @@ const GOOGLE_CLIENT_ID = '701207960653-cfdhpbiuu7erfp04j5icc3921lvm2lcr.apps.goo
 const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/gmail.settings.basic',
-  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
 ]
 
 /** The CLI sends 32 random bytes as base64url (43 chars). */

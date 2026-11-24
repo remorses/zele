@@ -20,7 +20,8 @@ import { colors as pc } from 'goke'
 import * as orm from 'drizzle-orm'
 import { getDb, schema } from './db.js'
 import { GmailClient } from './gmail-client.js'
-import { CalendarClient } from './calendar-client.js'
+import { CalDavCalendarClient, type CalendarClient } from './calendar-client.js'
+import { GoogleCalendarApiClient } from './google-calendar-client.js'
 import * as errore from 'errore'
 import {
   AccountRequiredError,
@@ -975,7 +976,7 @@ export async function getGmailClient(
 // ---------------------------------------------------------------------------
 
 /**
- * Get authenticated CalendarClient instances for Google accounts only.
+ * Get authenticated calendar clients for Google accounts only (see createCalendarClient).
  * IMAP/SMTP accounts are silently skipped (calendar requires Google OAuth).
  */
 export async function getCalendarClients(
@@ -1005,16 +1006,27 @@ export async function getCalendarClients(
     })
   }
 
-  const results = await Promise.all(
-    googleAccounts.map(async (account) => {
-      const auth = await authenticateAccount(account)
-      const { token } = await auth.getAccessToken()
-      if (!token) throw new Error(`Failed to get access token for ${account.email}`)
-      return { email: account.email, appId: account.appId, client: new CalendarClient({ accessToken: token, email: account.email, appId: account.appId }) }
-    }),
+  return Promise.all(
+    googleAccounts.map(async (account) => ({
+      email: account.email,
+      appId: account.appId,
+      client: await createCalendarClient(account),
+    })),
   )
+}
 
-  return results
+const CALENDAR_EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
+
+/** Calendar REST API when the login granted calendar.events (zele's own client),
+ *  else CalDAV, which needs the full calendar scope the third-party clients grant. */
+async function createCalendarClient(account: AccountId): Promise<CalendarClient> {
+  const auth = await authenticateAccount(account)
+  const granted = auth.credentials.scope?.split(' ') ?? []
+  if (granted.includes(CALENDAR_EVENTS_SCOPE)) return new GoogleCalendarApiClient({ auth, email: account.email })
+
+  const { token } = await auth.getAccessToken()
+  if (!token) throw new Error(`Failed to get access token for ${account.email}`)
+  return new CalDavCalendarClient({ accessToken: token, email: account.email, appId: account.appId })
 }
 
 /**

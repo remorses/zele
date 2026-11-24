@@ -35,11 +35,12 @@
     },
     "zele": {
       "name": "zele",
-      "version": "0.11.0",
+      "version": "0.12.1",
       "bin": "./dist/cli.js",
       "dependencies": {
         "@clack/prompts": "^1.2.0",
         "@goke/mcp": "^0.2.0",
+        "@googleapis/calendar": "^20.2.0",
         "@googleapis/gmail": "^22.0.1",
         "@opentui/core": "^0.2.12",
         "@opentui/react": "^0.2.12",
@@ -206,6 +207,8 @@
     "@fontsource-variable/jetbrains-mono": ["@fontsource-variable/jetbrains-mono@5.3.0", "", {}, "sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw=="],
 
     "@goke/mcp": ["@goke/mcp@0.2.0", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.30.0", "js-yaml": "^4.1.1" }, "peerDependencies": { "goke": "^6.19.0" } }, "sha512-WTjzriZd7zuf9g2y7BCB5XQkO2IdZrlkWvi6OTNVIsjKKAWtLsK1a8hBmpxRk5r8bX3Nt2hNRX7Rn+5Y74F3OQ=="],
+
+    "@googleapis/calendar": ["@googleapis/calendar@20.2.0", "", { "dependencies": { "googleapis-common": "^9.0.0" } }, "sha512-w5z+D0z3RlikxjT311ykEcWQpPFN5CJPbA8QkISGIPfA8D2tbyFoFYLBwXZQwq8u+twZdpp1FnboSiLY/bjLcA=="],
 
     "@googleapis/gmail": ["@googleapis/gmail@22.0.2", "", { "dependencies": { "googleapis-common": "^9.0.0" } }, "sha512-/Yg6UwLZaI74jY4Q8RhAFlEw4q+71c47oKlqr3ArGTG4HERa0S5NgzmTjECcV720tATnz9bpIvAnJ91VVnNHVA=="],
 

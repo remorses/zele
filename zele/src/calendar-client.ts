@@ -1,4 +1,11 @@
-// CalDAV-based calendar client for CLI use.
+// Calendar client interface used by the `zele cal` commands, and its CalDAV implementation.
+// Two implementations, picked per account by its granted scopes (getCalendarClients in auth.ts):
+// - CalDavCalendarClient (this file): Google CalDAV, needs the full `calendar` scope.
+//   Used by the third-party clients (Thunderbird, GNOME, KDE) and custom clients.
+// - GoogleCalendarApiClient (google-calendar-client.ts): Calendar REST API, needs only
+//   `calendar.events` + `calendar.calendarlist.readonly`. Used by zele's own client.
+//
+// CalDAV implementation:
 // Uses tsdav for CalDAV protocol and ts-ics for typed iCalendar parse/generate.
 // Auth: passes a Bearer token via headers (reuses existing google-auth-library OAuth2).
 // Google CalDAV endpoint: https://apidata.googleusercontent.com/caldav/v2/
@@ -52,7 +59,7 @@ function responseError({ email, res, what }: { email: string; res: Response; wha
 }
 
 // ---------------------------------------------------------------------------
-// Types (kept identical to previous API so commands layer is unchanged)
+// Shared types and the CalendarClient interface
 // ---------------------------------------------------------------------------
 
 export interface CalendarListItem {
@@ -118,6 +125,95 @@ export interface FreeBusyBlock {
 export interface FreeBusyResult {
   calendar: string
   busy: FreeBusyBlock[]
+}
+
+export interface ListEventsParams {
+  calendarId?: string
+  timeMin?: string
+  timeMax?: string
+  query?: string
+  maxResults?: number
+  pageToken?: string
+}
+
+export interface EventRef {
+  calendarId?: string
+  eventId: string
+}
+
+export interface CreateEventParams {
+  calendarId?: string
+  summary: string
+  start: string
+  end: string
+  allDay?: boolean
+  description?: string
+  location?: string
+  attendees?: string[]
+  withMeet?: boolean
+  recurrence?: string[]
+  reminders?: CalendarReminder[]
+  colorId?: string
+  visibility?: string
+  transparency?: string
+}
+
+export interface UpdateEventParams extends EventRef {
+  summary?: string
+  start?: string
+  end?: string
+  allDay?: boolean
+  description?: string
+  location?: string
+  addAttendees?: string[]
+  removeAttendees?: string[]
+  withMeet?: boolean
+  colorId?: string
+  visibility?: string
+  transparency?: string
+}
+
+export interface RespondParams extends EventRef {
+  status: 'accepted' | 'declined' | 'tentative'
+  comment?: string
+}
+
+export type CalendarWriteError = AuthError | ApiError | NotFoundError | MissingDataError | ParseError
+
+/** What the `zele cal` commands need from a calendar backend. `calendarId` defaults to 'primary'. */
+export interface CalendarClient {
+  listCalendars(): Promise<CalendarListItem[] | AuthError | ApiError>
+  getTimezone(calendarId?: string): Promise<string | AuthError | ApiError | NotFoundError>
+  listEvents(params?: ListEventsParams): Promise<EventListResult | AuthError | ApiError | NotFoundError>
+  getEvent(params: EventRef): Promise<CalendarEvent | AuthError | ApiError | NotFoundError>
+  createEvent(params: CreateEventParams): Promise<CalendarEvent | CalendarWriteError>
+  updateEvent(params: UpdateEventParams): Promise<CalendarEvent | CalendarWriteError>
+  deleteEvent(params: EventRef): Promise<void | CalendarWriteError>
+  respondToEvent(params: RespondParams): Promise<CalendarEvent | CalendarWriteError>
+}
+
+const FREEBUSY_MAX_EVENTS = 200
+
+/** Busy blocks per calendar from its events. A calendar that fails to load shows as free. */
+export async function getFreeBusy({ client, calendarIds, timeMin, timeMax }: {
+  client: CalendarClient
+  calendarIds: string[]
+  timeMin: string
+  timeMax: string
+}): Promise<FreeBusyResult[]> {
+  return Promise.all(
+    calendarIds.map(async (calendarId) => {
+      const result = await client.listEvents({ calendarId, timeMin, timeMax, maxResults: FREEBUSY_MAX_EVENTS })
+      if (result instanceof Error) {
+        console.warn(`freebusy: ${calendarId}: ${result.message}`)
+        return { calendar: calendarId, busy: [] }
+      }
+      const busy = result.events
+        .filter((e) => e.transparency !== 'transparent' && !e.allDay)
+        .map((e) => ({ start: e.start, end: e.end }))
+      return { calendar: calendarId, busy }
+    }),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +486,7 @@ function isExpired(createdAt: Date, ttlMs: number): boolean {
   return createdAt.getTime() + ttlMs < Date.now()
 }
 
-export class CalendarClient {
+export class CalDavCalendarClient implements CalendarClient {
   private headers: Record<string, string>
   private email: string
   private appId: string
@@ -630,15 +726,7 @@ export class CalendarClient {
     timeMax,
     query,
     maxResults = 20,
-    pageToken,
-  }: {
-    calendarId?: string
-    timeMin?: string
-    timeMax?: string
-    query?: string
-    maxResults?: number
-    pageToken?: string
-  } = {}): Promise<EventListResult | AuthError | ApiError | NotFoundError> {
+  }: ListEventsParams = {}): Promise<EventListResult | AuthError | ApiError | NotFoundError> {
     // Always fresh: event lists are user-facing live data.
 
     const cal = await this.resolveCalendar(calendarId)
@@ -680,13 +768,7 @@ export class CalendarClient {
     return result
   }
 
-  async getEvent({
-    calendarId = 'primary',
-    eventId,
-  }: {
-    calendarId?: string
-    eventId: string
-  }): Promise<CalendarEvent | AuthError | ApiError | NotFoundError> {
+  async getEvent({ calendarId = 'primary', eventId }: EventRef): Promise<CalendarEvent | AuthError | ApiError | NotFoundError> {
     const cal = await this.resolveCalendar(calendarId)
     if (cal instanceof Error) return cal
 
@@ -720,22 +802,7 @@ export class CalendarClient {
     colorId,
     visibility,
     transparency,
-  }: {
-    calendarId?: string
-    summary: string
-    start: string
-    end: string
-    allDay?: boolean
-    description?: string
-    location?: string
-    attendees?: string[]
-    withMeet?: boolean
-    recurrence?: string[]
-    reminders?: Array<{ method: string; minutes: number }>
-    colorId?: string
-    visibility?: string
-    transparency?: string
-  }): Promise<CalendarEvent | AuthError | ApiError | NotFoundError | ParseError> {
+  }: CreateEventParams): Promise<CalendarEvent | CalendarWriteError> {
     const cal = await this.resolveCalendar(calendarId)
     if (cal instanceof Error) return cal
     const uid = generateUID()
@@ -792,22 +859,7 @@ export class CalendarClient {
     colorId,
     visibility,
     transparency,
-  }: {
-    calendarId?: string
-    eventId: string
-    summary?: string
-    start?: string
-    end?: string
-    allDay?: boolean
-    description?: string
-    location?: string
-    addAttendees?: string[]
-    removeAttendees?: string[]
-    withMeet?: boolean
-    colorId?: string
-    visibility?: string
-    transparency?: string
-  }): Promise<CalendarEvent | AuthError | ApiError | NotFoundError | MissingDataError | ParseError> {
+  }: UpdateEventParams): Promise<CalendarEvent | CalendarWriteError> {
     const existing = await this.getEvent({ calendarId, eventId })
     if (existing instanceof Error) return existing
     if (!existing.url || !existing.etag) {
@@ -868,13 +920,7 @@ export class CalendarClient {
     return event
   }
 
-  async deleteEvent({
-    calendarId = 'primary',
-    eventId,
-  }: {
-    calendarId?: string
-    eventId: string
-  }): Promise<void | AuthError | ApiError | NotFoundError | MissingDataError> {
+  async deleteEvent({ calendarId = 'primary', eventId }: EventRef): Promise<void | CalendarWriteError> {
     const existing = await this.getEvent({ calendarId, eventId })
     if (existing instanceof Error) return existing
     if (!existing.url) {
@@ -897,12 +943,7 @@ export class CalendarClient {
     eventId,
     status,
     comment,
-  }: {
-    calendarId?: string
-    eventId: string
-    status: 'accepted' | 'declined' | 'tentative'
-    comment?: string
-  }): Promise<CalendarEvent | AuthError | ApiError | NotFoundError | MissingDataError | ParseError> {
+  }: RespondParams): Promise<CalendarEvent | CalendarWriteError> {
     const existing = await this.getEvent({ calendarId, eventId })
     if (existing instanceof Error) return existing
     if (!existing.url || !existing.etag) {
@@ -935,40 +976,4 @@ export class CalendarClient {
 
     return event
   }
-
-  async getFreeBusy({
-    calendarIds,
-    timeMin,
-    timeMax,
-  }: {
-    calendarIds: string[]
-    timeMin: string
-    timeMax: string
-  }): Promise<FreeBusyResult[]> {
-    const results: FreeBusyResult[] = []
-
-    for (const calId of calendarIds) {
-      // listEvents returns errors as values — no try/catch needed.
-      // Errors (auth, not found) yield an empty busy list for that calendar.
-      const eventsResult = await this.listEvents({
-        calendarId: calId,
-        timeMin,
-        timeMax,
-        maxResults: 200,
-      })
-      if (eventsResult instanceof Error) {
-        results.push({ calendar: calId, busy: [] })
-        continue
-      }
-
-      const busy: FreeBusyBlock[] = eventsResult.events
-        .filter((e: CalendarEvent) => e.transparency !== 'transparent' && !e.allDay)
-        .map((e: CalendarEvent) => ({ start: e.start, end: e.end }))
-
-      results.push({ calendar: calId, busy })
-    }
-
-    return results
-  }
-
 }

@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { isAgent } from 'goke'
 import * as clack from '@clack/prompts'
 import { getCalendarClients, getCalendarClient } from '../auth.js'
-import type { CalendarClient, CalendarEvent, CalendarListItem, EventListResult } from '../calendar-client.js'
+import { getFreeBusy, type CalendarEvent, type EventListResult } from '../calendar-client.js'
 import { AuthError } from '../api-utils.js'
 import { createOutput, formatEventTime, type Output } from '../output.js'
 import { resolveTimeRange, parseTimeExpression, parseDuration, isDateOnly } from '../calendar-time.js'
@@ -527,7 +527,8 @@ export function registerCalendarCommands(cli: ZeleCli) {
       const timeMin = parseTimeExpression(options.from, tz)
       const timeMax = parseTimeExpression(options.to, tz)
 
-      const results = await client.getFreeBusy({
+      const results = await getFreeBusy({
+        client,
         calendarIds,
         timeMin,
         timeMax,
