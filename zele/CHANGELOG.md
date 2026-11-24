@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1
+
+1. **Safer calendar guest updates with zele's own Google client** — `cal respond` now sends only your own answer, and `cal update --add-attendees` / `--remove-attendees` refuse to save if someone else changed the event in the meantime. Before, a guest that another editor removed at the same moment could be added back and emailed.
+
 ## 0.13.0
 
 1. **zele's own Google client uses narrower calendar scopes** — `ZELE_GOOGLE_CLIENT=zele` now asks for `calendar.events` and `calendar.calendarlist.readonly` instead of full `calendar`, and `zele cal` talks to the Google Calendar REST API for these accounts. That also brings real Google Meet links, reminders, colors and recurrence on new events, expanded recurring events in `cal events`, and a Google Calendar link in event output:
